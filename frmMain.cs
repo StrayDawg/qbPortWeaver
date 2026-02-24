@@ -143,7 +143,7 @@ namespace qbPortWeaver
         private void InitializeTrayIcon()
         {
             _trayMenu = new ContextMenuStrip();
-            _trayMenu.Items.Add("Update Port Now", null, UpdatePortNow_Click);
+            _trayMenu.Items.Add("Synchronize Port Now", null, UpdatePortNow_Click);
             _trayMenu.Items.Add("Show Logs", null, (s, e) => AppConstants.OpenFileInNotepad(AppConstants.GetLogFilePath()));
             _trayMenu.Items.Add("Clear Logs", null, (s, e) =>
             {

@@ -106,7 +106,7 @@ On first run, all settings are initialized with sensible defaults.
 
 ### Tray Menu Options
 
-- Update Port Now
+- Synchronize Port Now
 - Show Logs
 - Clear Logs
 - Settings
@@ -249,7 +249,7 @@ The modular architecture makes it easy to:
 - Various stability improvements
 
 ### 1.1.0
-- Added **Update Port Now** tray menu option for on-demand port sync
+- Added **Synchronize Port Now** tray menu option for on-demand port sync
 
 ### 1.0.0
 - Initial release
