@@ -28,8 +28,8 @@ namespace qbPortWeaver
         // Semaphore to prevent concurrent updates
         private readonly SemaphoreSlim _updateSemaphore = new SemaphoreSlim(1, 1);
 
-        // Manual update triggered flag (thread-safe with volatile)
-        private volatile bool _manualUpdateTriggered;
+        // Manual sync triggered flag (thread-safe with volatile)
+        private volatile bool _manualSyncTriggered;
 
         // Shutdown cancellation token to signal graceful exit
         private readonly CancellationTokenSource _shutdownCts = new CancellationTokenSource();
@@ -75,29 +75,6 @@ namespace qbPortWeaver
 
             // Start main loop (intentional fire-and-forget)
             _ = Task.Run(RunMainLoopAsync);
-        }
-
-        private async Task PerformUpdateCheckAsync()
-        {
-            try
-            {
-                var update = await UpdateChecker.CheckForUpdateAsync(AppConstants.APP_VERSION);
-                if (update.HasValue)
-                {
-                    var result = MessageBox.Show(
-                        $"A new version of {AppConstants.APP_NAME} is available: {update.Value.Version}\n\nWould you like to open the download page?",
-                        $"{AppConstants.APP_NAME} - Update Available",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information);
-
-                    if (result == DialogResult.Yes)
-                        Process.Start(new ProcessStartInfo(update.Value.Url) { UseShellExecute = true })?.Dispose();
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.Instance.LogDebug($"frmMain.PerformUpdateCheckAsync: Update check failed: {ex.Message}");
-            }
         }
 
         // Handle form closing (user exit, Windows shutdown/restart/logoff)
@@ -153,10 +130,11 @@ namespace qbPortWeaver
             }
         }
 
+        // Builds the context menu and creates the tray icon
         private void InitializeTrayIcon()
         {
             _trayMenu = new ContextMenuStrip();
-            _trayMenu.Items.Add("Synchronize Port Now", null, UpdatePortNow_Click);
+            _trayMenu.Items.Add("Synchronize Port Now", null, SynchronizePortNow_Click);
             _trayMenu.Items.Add("Show Logs", null, (s, e) => AppConstants.OpenFileInNotepad(AppConstants.GetLogFilePath()));
             _trayMenu.Items.Add("Clear Logs", null, (s, e) =>
             {
@@ -211,12 +189,12 @@ namespace qbPortWeaver
                         _updateSemaphore.Release();
                     }
 
-                    // After a manual update, wait only 10 seconds before next check
-                    if (_manualUpdateTriggered)
+                    // After a manual sync, wait only 10 seconds before next check
+                    if (_manualSyncTriggered)
                     {
-                        _manualUpdateTriggered = false;
-                        updateInterval = AppConstants.MANUAL_UPDATE_WAIT_SECONDS;
-                        LogManager.Instance.LogMessage($"Manual update completed, waiting {AppConstants.MANUAL_UPDATE_WAIT_SECONDS} seconds before resuming normal interval", "INFO");
+                        _manualSyncTriggered = false;
+                        updateInterval = AppConstants.MANUAL_SYNC_WAIT_SECONDS;
+                        LogManager.Instance.LogMessage($"Manual sync completed, waiting {AppConstants.MANUAL_SYNC_WAIT_SECONDS} seconds before resuming normal interval", "INFO");
                     }
 
                     if (await ShutdownRequestedDuringDelayAsync(updateInterval))
@@ -243,7 +221,7 @@ namespace qbPortWeaver
             try
             {
                 LogManager.Instance.LogMessage($"Waiting for {updateInterval} seconds", "INFO");
-                // Link both tokens: _delayCancel (manual update) and _shutdownCts (app exit)
+                // Link both tokens: _delayCancel (manual sync) and _shutdownCts (app exit)
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_delayCancel.Token, _shutdownCts.Token);
                 await Task.Delay(updateInterval * AppConstants.MILLISECONDS_PER_SECOND, linkedCts.Token);
             }
@@ -254,8 +232,8 @@ namespace qbPortWeaver
                     LogManager.Instance.LogMessage("Shutdown requested, exiting main loop", "INFO");
                     return true;
                 }
-                // Manual update interrupts delay - loop will restart immediately
-                LogManager.Instance.LogMessage("Delay interrupted by manual update", "INFO");
+                // Manual sync interrupts delay - loop will restart immediately
+                LogManager.Instance.LogMessage("Delay interrupted by manual sync", "INFO");
             }
 
             // Reset token for next loop iteration (properly dispose old one)
@@ -292,10 +270,35 @@ namespace qbPortWeaver
             }
         }
 
-        private void UpdatePortNow_Click(object? sender, EventArgs e)
+        // Checks GitHub for a newer release and prompts the user to open the download page if one is found
+        private async Task PerformUpdateCheckAsync()
         {
-            _manualUpdateTriggered = true;
-            LogManager.Instance.LogMessage("Manual update requested", "INFO");
+            try
+            {
+                var update = await UpdateChecker.CheckForUpdateAsync();
+                if (update.HasValue)
+                {
+                    var result = MessageBox.Show(
+                        $"A new version of {AppConstants.APP_NAME} is available: {update.Value.Version}\n\nWould you like to open the download page?",
+                        $"{AppConstants.APP_NAME} - Update Available",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information);
+
+                    if (result == DialogResult.Yes)
+                        Process.Start(new ProcessStartInfo(update.Value.Url) { UseShellExecute = true })?.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.Instance.LogDebug($"frmMain.PerformUpdateCheckAsync: Update check failed: {ex.Message}");
+            }
+        }
+
+        // Triggers an immediate sync cycle by interrupting the current wait interval
+        private void SynchronizePortNow_Click(object? sender, EventArgs e)
+        {
+            _manualSyncTriggered = true;
+            LogManager.Instance.LogMessage("Manual sync requested", "INFO");
 
             // Interrupt the wait inside the main loop immediately.
             try { _delayCancel.Cancel(); }
@@ -338,6 +341,7 @@ namespace qbPortWeaver
             };
         }
 
+        // Rebuilds the tray tooltip text from the last sync status
         private void UpdateTrayTooltip()
         {
             string statusLine = _lastSyncStatus switch

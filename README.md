@@ -48,7 +48,7 @@ The application runs in the system tray, manages configuration and logging, and 
   Optionally force start qBittorrent if it is not running.
 
 - **Automatic Update Checker**
-  Checks GitHub for new releases on startup and offers to open the download page.
+  Checks GitHub for new releases on startup and every 12 hours, and offers to open the download page. The **About** dialog (tray menu → About) also shows the current and latest version, update status, and contributor links.
 
 - **Startup Option**
   Allows enabling or disabling automatic startup with Windows.
@@ -110,6 +110,7 @@ On first run, all settings are initialized with sensible defaults.
 - Show Logs
 - Clear Logs
 - Settings
+- About
 - Start Automatically with Windows
 - Exit
 
@@ -208,6 +209,8 @@ The modular architecture makes it easy to:
 ### 2.1.0
 - Removed legacy INI file migration code — v2.0.0 is the required baseline for upgrading
 - Internal code cleanup and consistency improvements across all modules
+- New **About** dialog (tray menu → About): shows current and latest GitHub release, update status, and contributor links
+- Update checker now also runs every 12 hours in the background, not only on startup
 
 ### 2.0.0
 - **Tray status indicator**: the tray icon now shows a colored dot (green / orange / red) reflecting the last sync result, and the tooltip shows the current port and status without opening the log file

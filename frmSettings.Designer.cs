@@ -261,7 +261,7 @@ namespace qbPortWeaver
             MaximizeBox     = false;
             MinimizeBox     = false;
             ShowIcon        = false;
-            StartPosition   = FormStartPosition.CenterParent;
+            StartPosition   = FormStartPosition.CenterScreen;
             Text            = $"{AppConstants.APP_NAME} | Settings";
 
             grpGeneral.ResumeLayout(false);

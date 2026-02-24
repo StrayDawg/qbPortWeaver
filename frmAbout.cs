@@ -4,6 +4,7 @@ namespace qbPortWeaver
 {
     public partial class frmAbout : Form
     {
+        // Set to the release URL when an update is available; null when up-to-date or not yet checked
         private string? _releaseUrl;
 
         public frmAbout()
@@ -11,12 +12,14 @@ namespace qbPortWeaver
             InitializeComponent();
         }
 
+        // Kick off the GitHub data fetch as fire-and-forget; the IsDisposed guard in the async method handles early close
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
             _ = LoadGitHubDataAsync();
         }
 
+        // Fetches the latest release info and contributor list in parallel, then populates all UI fields
         private async Task LoadGitHubDataAsync()
         {
             btnCheckForUpdates.Enabled      = false;
@@ -27,10 +30,11 @@ namespace qbPortWeaver
             _releaseUrl                     = null;
 
             // Fetch release info and release commit authors in parallel
-            var releaseTask      = UpdateChecker.GetLatestReleaseInfoAsync(AppConstants.APP_VERSION);
+            var releaseTask      = UpdateChecker.GetLatestReleaseInfoAsync();
             var contributorsTask = UpdateChecker.GetReleaseContributorsAsync();
             await Task.WhenAll(releaseTask, contributorsTask);
 
+            // Guard against the form being closed while the GitHub requests were in flight
             if (IsDisposed) return;
 
             // ── Contributors ─────────────────────────────────────────────
@@ -74,7 +78,7 @@ namespace qbPortWeaver
         }
 
         // Populates lnkAuthor with one clickable link region per contributor
-        private void SetContributorLinks(IReadOnlyList<ContributorInfo> contributors)
+        private void SetContributorLinks(IReadOnlyList<UpdateChecker.ContributorInfo> contributors)
         {
             var sb = new System.Text.StringBuilder();
             for (int i = 0; i < contributors.Count; i++)
@@ -94,6 +98,7 @@ namespace qbPortWeaver
             }
         }
 
+        // Opens the release page if an update is available; otherwise re-runs the update check
         private void btnCheckForUpdates_Click(object? sender, EventArgs e)
         {
             if (_releaseUrl != null)
@@ -102,17 +107,20 @@ namespace qbPortWeaver
                 _ = LoadGitHubDataAsync();
         }
 
+        // Each link region carries its contributor profile URL as LinkData
         private void lnkAuthor_LinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)
         {
-            if (e.Link.LinkData is string url && !string.IsNullOrEmpty(url))
+            if (e.Link?.LinkData is string url && !string.IsNullOrEmpty(url))
                 OpenUrl(url);
         }
 
+        // Opens the project repository in the default browser
         private void lnkGitHub_LinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)
         {
             OpenUrl(AppConstants.GITHUB_REPO_URL);
         }
 
+        // Opens a URL in the default browser; UseShellExecute is required for shell-handled URLs
         private static void OpenUrl(string url)
         {
             try

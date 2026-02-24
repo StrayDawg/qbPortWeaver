@@ -9,6 +9,7 @@ namespace qbPortWeaver
             if (disposing)
             {
                 picIcon.Image?.Dispose();
+                lblAppName.Font?.Dispose();
                 if (components != null) components.Dispose();
             }
             base.Dispose(disposing);
@@ -169,7 +170,7 @@ namespace qbPortWeaver
             MaximizeBox     = false;
             MinimizeBox     = false;
             ShowIcon        = false;
-            StartPosition   = FormStartPosition.CenterParent;
+            StartPosition   = FormStartPosition.CenterScreen;
             Text            = $"{AppConstants.APP_NAME} | About";
 
             ((System.ComponentModel.ISupportInitialize)picIcon).EndInit();
