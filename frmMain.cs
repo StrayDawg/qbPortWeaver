@@ -111,7 +111,8 @@ namespace qbPortWeaver
             using var dotBrush    = new SolidBrush(dotColor);
 
             g.Clear(Color.Transparent);
-            g.DrawIcon(baseIcon, new Rectangle(0, 0, 16, 16));
+            using var icon16 = new Icon(baseIcon, 16, 16);
+            g.DrawIcon(icon16, new Rectangle(0, 0, 16, 16));
 
             // 7×7 dark border circle, then 5×5 colored fill — visible on both light and dark taskbars
             g.FillEllipse(borderBrush, 9, 9, 7, 7);

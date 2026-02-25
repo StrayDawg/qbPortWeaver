@@ -10,6 +10,9 @@ namespace qbPortWeaver
         public frmAbout()
         {
             InitializeComponent();
+            lblAppVersion.Text = $"Version {AppConstants.APP_VERSION}";
+            lnkGitHub.Text     = $"{AppConstants.GITHUB_REPO_OWNER}/{AppConstants.APP_NAME}";
+            Text               = $"{AppConstants.APP_NAME} | About";
         }
 
         // Kick off the GitHub data fetch as fire-and-forget; the IsDisposed guard in the async method handles early close

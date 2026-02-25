@@ -87,6 +87,7 @@ Section "MainSection" SEC01
   
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
   CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_NAME}.exe"
+  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_NAME}.exe"
 
 SectionEnd
 
@@ -117,12 +118,11 @@ Section Uninstall
   ; Kill qbPortWeaver if running
   ExecWait 'cmd /c taskkill /F /IM ${PRODUCT_NAME}.exe'
 
-  Delete "$INSTDIR\*.*"
+  RMDir /r "$INSTDIR"
 
+  Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
-
   RMDir "$SMPROGRAMS\${PRODUCT_NAME}"
-  RMDir "$INSTDIR"
 
   DeleteRegKey ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}"
   SetAutoClose true
