@@ -11,7 +11,7 @@
     <version>TEMPLATE_VERSION</version>
     <title>qbPortWeaver</title>
     <authors>martsg666</authors>
-    <owners>CHOCOLATEY_MAINTAINER_USERNAME</owners>
+    <owners>martsg666</owners>
     <projectUrl>https://github.com/martsg666/qbPortWeaver</projectUrl>
     <packageSourceUrl>https://github.com/martsg666/qbPortWeaver/tree/master/choco</packageSourceUrl>
     <projectSourceUrl>https://github.com/martsg666/qbPortWeaver</projectSourceUrl>
