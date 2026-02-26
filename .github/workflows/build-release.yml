@@ -79,8 +79,11 @@ jobs:
         run: |
           if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
             choco install nsis --yes --no-progress
-            # Persist the NSIS directory for subsequent steps
-            Add-Content $env:GITHUB_PATH "${env:ProgramFiles(x86)}\NSIS"
+            $nsisDir = "${env:ProgramFiles(x86)}\NSIS"
+            # Update PATH for this step immediately
+            $env:PATH = "$nsisDir;$env:PATH"
+            # Persist for subsequent steps
+            Add-Content $env:GITHUB_PATH $nsisDir
           }
           makensis /VERSION
 
