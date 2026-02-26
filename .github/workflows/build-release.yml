@@ -1,0 +1,137 @@
+name: Build and Release
+
+# Triggers on any tag push matching v* (e.g. v2.1.1).
+# Can also be run manually to rebuild an existing tag's installer.
+on:
+  push:
+    tags:
+      - 'v*'
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v2.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write  # required to create releases and upload assets
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Derive the semver version from the tag (strip leading 'v')
+      # -----------------------------------------------------------------------
+      - name: Resolve tag and version
+        id: version
+        shell: pwsh
+        env:
+          GH_EVENT_NAME: ${{ github.event_name }}
+          GH_INPUT_TAG:  ${{ inputs.tag }}
+          GH_REF_NAME:   ${{ github.ref_name }}
+        run: |
+          if ($env:GH_EVENT_NAME -eq 'workflow_dispatch') {
+            $tag = $env:GH_INPUT_TAG
+          } else {
+            $tag = $env:GH_REF_NAME
+          }
+          $version = $tag.TrimStart('v')
+          "TAG=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Building version: $version  (tag: $tag)"
+
+      # -----------------------------------------------------------------------
+      # 2. Checkout — full history lets --generate-notes span all commits
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # 3. Build the .NET application (version stamped from the tag)
+      # -----------------------------------------------------------------------
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Build application
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          $v = $env:BUILD_VERSION
+          dotnet build qbPortWeaver.csproj `
+            --configuration Release `
+            /p:Version=$v `
+            /p:FileVersion="$v.0" `
+            /p:AssemblyVersion="$v.0"
+
+      # -----------------------------------------------------------------------
+      # 4. Compile the NSIS installer (version passed via /D, not hardcoded)
+      # -----------------------------------------------------------------------
+      - name: Ensure NSIS is available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis --yes --no-progress
+            # Persist the NSIS directory for subsequent steps
+            Add-Content $env:GITHUB_PATH "${env:ProgramFiles(x86)}\NSIS"
+          }
+          makensis /VERSION
+
+      - name: Compile NSIS installer
+        id: nsis
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          $version = $env:BUILD_VERSION
+
+          # Run makensis from inside installer/ so all relative paths in the
+          # script (..\ for bin output, icons, etc.) resolve correctly.
+          Push-Location installer
+          try {
+            makensis /DPRODUCT_VERSION=$version qbPortWeaverSetup.nsi
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+
+          $setupExe = "installer\qbPortWeaver_${version}_Setup.exe"
+          if (-not (Test-Path $setupExe)) {
+            Write-Error "Expected installer not found: $setupExe"
+            exit 1
+          }
+
+          "SETUP_PATH=$setupExe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Installer ready: $setupExe"
+
+      # -----------------------------------------------------------------------
+      # 5. Create GitHub Release with auto-generated notes, or update existing
+      # -----------------------------------------------------------------------
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN:    ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.TAG }}
+          SETUP_PATH:  ${{ steps.nsis.outputs.SETUP_PATH }}
+        run: |
+          $tag   = $env:RELEASE_TAG
+          $asset = $env:SETUP_PATH
+
+          # Check whether the release already exists (e.g. manual re-run)
+          gh release view $tag 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists — uploading asset"
+            gh release upload $tag $asset --clobber
+          } else {
+            Write-Host "Creating release $tag"
+            gh release create $tag $asset `
+              --title "qbPortWeaver $tag" `
+              --generate-notes
+          }
