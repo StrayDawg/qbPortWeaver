@@ -2,7 +2,11 @@
 
 ; HM NIS Edit Wizard helper defines
 !define PRODUCT_NAME "qbPortWeaver"
-!define PRODUCT_VERSION "2.1.0"
+; PRODUCT_VERSION can be overridden at compile time with:
+;   makensis /DPRODUCT_VERSION=x.y.z qbPortWeaverSetup.nsi
+!ifndef PRODUCT_VERSION
+  !define PRODUCT_VERSION "2.1.0"
+!endif
 !define PRODUCT_PUBLISHER "@martsg666"
 !define PRODUCT_WEB_SITE "https://github.com/martsg666/qbPortWeaver"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
