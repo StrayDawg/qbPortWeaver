@@ -17,7 +17,7 @@ namespace qbPortWeaver
         // UI
         public const int MAX_TOOLTIP_LENGTH = 63;
         public const int BALLOON_TIP_DURATION_MS = 750;
-0
+
         // GitHub — only the owner is a literal; all URLs are derived
         public const string GITHUB_REPO_OWNER = "martsg666";
         public static readonly string GITHUB_REPO_URL = $"https://github.com/{GITHUB_REPO_OWNER}/{APP_NAME}";
