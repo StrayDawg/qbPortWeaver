@@ -5,11 +5,12 @@ namespace qbPortWeaver
 {
     public static class UpdateChecker
     {
-        private static readonly string GITHUB_BASE_API_URL  = $"https://api.github.com/repos/{AppConstants.GITHUB_REPO_OWNER}/{AppConstants.APP_NAME}";
-        private static readonly string GITHUB_API_URL       = GITHUB_BASE_API_URL + "/releases/latest";
         private const string JSON_HTML_URL_ELEMENT = "html_url";
         private const string JSON_HTML_TAG_ELEMENT = "tag_name";
         private const int HTTP_TIMEOUT_SECONDS = 10;
+
+        private static readonly string GITHUB_BASE_API_URL  = $"https://api.github.com/repos/{AppConstants.GITHUB_REPO_OWNER}/{AppConstants.APP_NAME}";
+        private static readonly string GITHUB_API_URL       = GITHUB_BASE_API_URL + "/releases/latest";
 
         public record LatestReleaseInfo(string TagName, string ReleaseUrl, bool IsNewer);
         public record ContributorInfo(string Login, string ProfileUrl);
@@ -116,12 +117,12 @@ namespace qbPortWeaver
         {
             if (releases.Count == 0) return null;
 
-            string latestTag = releases[0].TryGetProperty(JSON_HTML_TAG_ELEMENT, out var t0) ? t0.GetString() ?? "" : "";
+            string latestTag = releases[0].TryGetProperty(JSON_HTML_TAG_ELEMENT, out var tagEl)  ? tagEl.GetString()  ?? "" : "";
             if (string.IsNullOrEmpty(latestTag)) return null;
 
             if (releases.Count >= 2)
             {
-                string prevTag = releases[1].TryGetProperty(JSON_HTML_TAG_ELEMENT, out var t1) ? t1.GetString() ?? "" : "";
+                string prevTag = releases[1].TryGetProperty(JSON_HTML_TAG_ELEMENT, out var prevEl) ? prevEl.GetString() ?? "" : "";
                 if (!string.IsNullOrEmpty(prevTag))
                     return $"{GITHUB_BASE_API_URL}/compare/{prevTag}...{latestTag}";
             }
@@ -153,8 +154,8 @@ namespace qbPortWeaver
                 if (!commit.TryGetProperty("author", out var authorEl) || authorEl.ValueKind == JsonValueKind.Null)
                     continue;
 
-                string login = authorEl.TryGetProperty("login",              out var l) ? l.GetString() ?? "" : "";
-                string url   = authorEl.TryGetProperty(JSON_HTML_URL_ELEMENT, out var u) ? u.GetString() ?? "" : "";
+                string login = authorEl.TryGetProperty("login",              out var loginEl) ? loginEl.GetString() ?? "" : "";
+                string url   = authorEl.TryGetProperty(JSON_HTML_URL_ELEMENT, out var urlEl)   ? urlEl.GetString()   ?? "" : "";
 
                 if (string.IsNullOrEmpty(login)) continue;
                 if (login.EndsWith("[bot]", StringComparison.OrdinalIgnoreCase)) continue;

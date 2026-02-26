@@ -22,13 +22,13 @@ namespace qbPortWeaver
         public const string GITHUB_REPO_OWNER = "martsg666";
         public static readonly string GITHUB_REPO_URL = $"https://github.com/{GITHUB_REPO_OWNER}/{APP_NAME}";
 
+        private const string LOG_FILE_NAME    = "qbPortWeaver.log";
+        private const string STATUS_FILE_NAME = "qbPortWeaver.status.json";
+
         // App data folder, created once on first access
         private static readonly string _appDataFolder = Directory.CreateDirectory(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), APP_NAME)
         ).FullName;
-
-        private const string LOG_FILE_NAME    = "qbPortWeaver.log";
-        private const string STATUS_FILE_NAME = "qbPortWeaver.status.json";
 
         public static string GetLogFilePath()      => Path.Combine(_appDataFolder, LOG_FILE_NAME);
         public static string GetStatusFilePath()   => Path.Combine(_appDataFolder, STATUS_FILE_NAME);

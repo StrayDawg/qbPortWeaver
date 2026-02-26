@@ -172,6 +172,30 @@ namespace qbPortWeaver
             };
         }
 
+        // Checks GitHub for a newer release and prompts the user to open the download page if one is found
+        private async Task PerformUpdateCheckAsync()
+        {
+            try
+            {
+                var update = await UpdateChecker.CheckForUpdateAsync();
+                if (update.HasValue)
+                {
+                    var result = MessageBox.Show(
+                        $"A new version of {AppConstants.APP_NAME} is available: {update.Value.Version}\n\nWould you like to open the download page?",
+                        $"{AppConstants.APP_NAME} - Update Available",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information);
+
+                    if (result == DialogResult.Yes)
+                        Process.Start(new ProcessStartInfo(update.Value.Url) { UseShellExecute = true })?.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.Instance.LogDebug($"frmMain.PerformUpdateCheckAsync: Update check failed: {ex.Message}");
+            }
+        }
+
         // Runs the port-sync loop until shutdown is requested
         private async Task RunMainLoopAsync()
         {
@@ -233,7 +257,7 @@ namespace qbPortWeaver
                     LogManager.Instance.LogMessage("Shutdown requested, exiting main loop", "INFO");
                     return true;
                 }
-                // Manual sync interrupts delay - loop will restart immediately
+                // Manual sync interrupts delay — loop will restart immediately
                 LogManager.Instance.LogMessage("Delay interrupted by manual sync", "INFO");
             }
 
@@ -271,37 +295,13 @@ namespace qbPortWeaver
             }
         }
 
-        // Checks GitHub for a newer release and prompts the user to open the download page if one is found
-        private async Task PerformUpdateCheckAsync()
-        {
-            try
-            {
-                var update = await UpdateChecker.CheckForUpdateAsync();
-                if (update.HasValue)
-                {
-                    var result = MessageBox.Show(
-                        $"A new version of {AppConstants.APP_NAME} is available: {update.Value.Version}\n\nWould you like to open the download page?",
-                        $"{AppConstants.APP_NAME} - Update Available",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information);
-
-                    if (result == DialogResult.Yes)
-                        Process.Start(new ProcessStartInfo(update.Value.Url) { UseShellExecute = true })?.Dispose();
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.Instance.LogDebug($"frmMain.PerformUpdateCheckAsync: Update check failed: {ex.Message}");
-            }
-        }
-
         // Triggers an immediate sync cycle by interrupting the current wait interval
         private void SynchronizePortNow_Click(object? sender, EventArgs e)
         {
             _manualSyncTriggered = true;
             LogManager.Instance.LogMessage("Manual sync requested", "INFO");
 
-            // Interrupt the wait inside the main loop immediately.
+            // Interrupt the wait inside the main loop immediately
             try { _delayCancel.Cancel(); }
             catch (ObjectDisposedException)
             {
