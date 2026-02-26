@@ -81,7 +81,18 @@ namespace qbPortWeaver
                 using var cmpStream = await cmpResponse.Content.ReadAsStreamAsync();
                 using var cmpDoc    = await JsonDocument.ParseAsync(cmpStream);
 
-                return ExtractContributors(GetCommitsArray(cmpDoc.RootElement));
+                var contributors = ExtractContributors(GetCommitsArray(cmpDoc.RootElement));
+
+                // Always list the repo owner first
+                int ownerIndex = contributors.FindIndex(c => c.Login.Equals(AppConstants.GITHUB_REPO_OWNER, StringComparison.OrdinalIgnoreCase));
+                if (ownerIndex > 0)
+                {
+                    var owner = contributors[ownerIndex];
+                    contributors.RemoveAt(ownerIndex);
+                    contributors.Insert(0, owner);
+                }
+
+                return contributors;
             }
             catch (Exception ex)
             {
