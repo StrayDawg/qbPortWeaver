@@ -6,7 +6,7 @@
 .DESCRIPTION
     This script:
       1. Queries the GitHub API for the latest release of qbPortWeaver
-      2. Downloads the Setup.exe asset
+      2. Downloads the Setup.msi asset
       3. Computes its SHA256 checksum
       4. Stamps the version, URL, and checksum into the choco/ package source files
       5. Runs `choco pack` to produce a .nupkg
@@ -82,9 +82,9 @@ Write-Ok "Tag     : $relTag"
 Write-Ok "Version : $version"
 
 # ---------------------------------------------------------------------------
-# Step 2: Locate the Setup.exe asset
+# Step 2: Locate the Setup.msi asset
 # ---------------------------------------------------------------------------
-$assetName = "qbPortWeaver_"+$version+"_Setup.exe"
+$assetName = "qbPortWeaver_"+$version+"_Setup.msi"
 $asset     = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
 
 if (-not $asset) {
@@ -101,10 +101,10 @@ Write-Ok "Asset   : $downloadUrl"
 # ---------------------------------------------------------------------------
 Write-Step 'Downloading release asset and computing checksum...'
 
-$tmpExe = Join-Path ([System.IO.Path]::GetTempPath()) $assetName
-Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpExe -UseBasicParsing
-$checksum = (Get-FileHash -Path $tmpExe -Algorithm SHA256).Hash.ToUpper()
-Remove-Item $tmpExe -Force
+$tmpMsi = Join-Path ([System.IO.Path]::GetTempPath()) $assetName
+Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpMsi -UseBasicParsing
+$checksum = (Get-FileHash -Path $tmpMsi -Algorithm SHA256).Hash.ToUpper()
+Remove-Item $tmpMsi -Force
 
 Write-Ok "SHA256  : $checksum"
 

@@ -75,50 +75,42 @@ jobs:
             /p:AssemblyVersion="$v.0"
 
       # -----------------------------------------------------------------------
-      # 4. Compile the NSIS installer (version passed via /D, not hardcoded)
+      # 4. Build the MSI installer using WiX Toolset v4
       # -----------------------------------------------------------------------
-      - name: Ensure NSIS is available
+      - name: Install WiX Toolset
         shell: pwsh
         run: |
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            choco install nsis --yes --no-progress
-            $nsisDir = "${env:ProgramFiles(x86)}\NSIS"
-            # Update PATH for this step immediately
-            $env:PATH = "$nsisDir;$env:PATH"
-            # Persist for subsequent steps
-            Add-Content $env:GITHUB_PATH $nsisDir
-          }
-          makensis /VERSION
+          dotnet tool install --global wix
+          wix extension add WixToolset.UI.wixext WixToolset.Util.wixext
+          wix --version
 
-      - name: Compile NSIS installer
-        id: nsis
+      - name: Build MSI installer
+        id: msi
         shell: pwsh
         env:
           BUILD_VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           $version = $env:BUILD_VERSION
 
-          # Run makensis from inside installer/ so all relative paths in the
-          # script (..\ for bin output, icons, etc.) resolve correctly.
-          Push-Location installer
-          try {
-            makensis /DPRODUCT_VERSION=$version qbPortWeaverSetup.nsi
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } finally {
-            Pop-Location
-          }
+          wix build installer\qbPortWeaver.wxs `
+            -ext WixToolset.UI.wixext `
+            -ext WixToolset.Util.wixext `
+            -d ProductVersion=$version `
+            -out "installer\qbPortWeaver_${version}_Setup.msi"
 
-          $setupExe = "installer\qbPortWeaver_${version}_Setup.exe"
-          if (-not (Test-Path $setupExe)) {
-            Write-Error "Expected installer not found: $setupExe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $setupMsi = "installer\qbPortWeaver_${version}_Setup.msi"
+          if (-not (Test-Path $setupMsi)) {
+            Write-Error "Expected installer not found: $setupMsi"
             exit 1
           }
 
-          "SETUP_PATH=$setupExe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Installer ready: $setupExe"
+          "SETUP_PATH=$setupMsi" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Installer ready: $setupMsi"
 
       # -----------------------------------------------------------------------
-      # 5. Compute SHA256 checksum of the local installer
+      # 5. Compute SHA256 checksum of the local MSI
       #    (computed here so we avoid re-downloading from the release later)
       # -----------------------------------------------------------------------
       - name: Compute installer checksum
@@ -127,11 +119,11 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.VERSION }}
           RELEASE_TAG:     ${{ steps.version.outputs.TAG }}
-          SETUP_PATH:      ${{ steps.nsis.outputs.SETUP_PATH }}
+          SETUP_PATH:      ${{ steps.msi.outputs.SETUP_PATH }}
         run: |
           $version   = $env:RELEASE_VERSION
           $tag       = $env:RELEASE_TAG
-          $assetName = "qbPortWeaver_${version}_Setup.exe"
+          $assetName = "qbPortWeaver_${version}_Setup.msi"
           $url       = "https://github.com/martsg666/qbPortWeaver/releases/download/$tag/$assetName"
           $checksum  = (Get-FileHash -Path $env:SETUP_PATH -Algorithm SHA256).Hash.ToUpper()
 
@@ -227,7 +219,7 @@ jobs:
         env:
           GH_TOKEN:    ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.version.outputs.TAG }}
-          SETUP_PATH:  ${{ steps.nsis.outputs.SETUP_PATH }}
+          SETUP_PATH:  ${{ steps.msi.outputs.SETUP_PATH }}
         run: |
           $tag   = $env:RELEASE_TAG
           $asset = $env:SETUP_PATH

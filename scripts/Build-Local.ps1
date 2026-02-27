@@ -1,18 +1,22 @@
 <#
 .SYNOPSIS
-    Builds a local qbPortWeaver installer for testing purposes.
+    Builds a local qbPortWeaver MSI installer for testing purposes.
 
 .DESCRIPTION
     Mirrors the CI build-release workflow locally:
       1. Publishes the .NET app as a self-contained single-file win-x64 executable
-      2. Compiles the NSIS installer using the published output
+      2. Builds the MSI installer using WiX Toolset v4
 
-    Use this script before running makensis locally — a regular Visual Studio
+    Use this script before building the MSI locally — a regular Visual Studio
     Release build does NOT produce the self-contained single-file output that
-    the NSIS script expects under bin\Release\net10.0-windows\win-x64\publish\.
+    the WiX source expects under bin\Release\net10.0-windows\win-x64\publish\.
+
+    WiX Toolset v4 must be installed as a .NET global tool:
+      dotnet tool install --global wix
+      wix extension add WixToolset.UI.wixext WixToolset.Util.wixext
 
 .PARAMETER Version
-    The version string to stamp into the build (e.g. '2.2.0').
+    The version string to stamp into the build (e.g. '2.3.0').
     Defaults to the version defined in AppConstants.cs.
 
 .EXAMPLE
@@ -21,7 +25,7 @@
 
 .EXAMPLE
     # Build with an explicit version override
-    .\scripts\Build-Local.ps1 -Version 2.2.0
+    .\scripts\Build-Local.ps1 -Version 2.3.0
 #>
 
 [CmdletBinding()]
@@ -86,39 +90,36 @@ if (-not (Test-Path $publishedExe)) {
 Write-Ok "Published : $publishedExe"
 
 # ---------------------------------------------------------------------------
-# Step 3: Compile the NSIS installer
-#         Must run from inside installer\ so relative paths in the .nsi
-#         script (..\ for bin output, icons, etc.) resolve correctly.
-#         Output: installer\qbPortWeaver_{version}_Setup.exe
+# Step 3: Build the MSI installer using WiX Toolset v4
+#         Output: installer\qbPortWeaver_{version}_Setup.msi
 # ---------------------------------------------------------------------------
-Write-Step 'Compiling NSIS installer...'
+Write-Step 'Building MSI installer with WiX Toolset v4...'
 
-# Resolve makensis — check PATH first, then fall back to the default install location
-$makensis = 'makensis'
-if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-    $fallback = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-    if (Test-Path $fallback) {
-        $makensis = $fallback
-        Write-Ok "Found makensis at: $makensis"
-    } else {
-        Write-Error "makensis not found. Install NSIS from https://nsis.sourceforge.io/"
-        exit 1
-    }
+# Ensure WiX is installed
+if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
+    Write-Host '    Installing WiX Toolset v4...' -ForegroundColor Yellow
+    dotnet tool install --global wix
+    if ($LASTEXITCODE -ne 0) { Write-Error 'Failed to install WiX Toolset.'; exit 1 }
 }
 
-Push-Location (Join-Path $repoRoot 'installer')
-try {
-    & $makensis /DPRODUCT_VERSION=$Version qbPortWeaverSetup.nsi
-    if ($LASTEXITCODE -ne 0) { Write-Error 'makensis failed.'; exit 1 }
-} finally {
-    Pop-Location
-}
+# Install required extensions (safe to run if already present)
+wix extension add WixToolset.UI.wixext WixToolset.Util.wixext 2>&1 | Out-Null
 
-$setupExe = Join-Path $repoRoot "installer\qbPortWeaver_${Version}_Setup.exe"
-if (-not (Test-Path $setupExe)) {
-    Write-Error "Expected installer not found: $setupExe"
+$wxsFile  = Join-Path $repoRoot 'installer\qbPortWeaver.wxs'
+$setupMsi = Join-Path $repoRoot "installer\qbPortWeaver_${Version}_Setup.msi"
+
+wix build $wxsFile `
+    -ext WixToolset.UI.wixext `
+    -ext WixToolset.Util.wixext `
+    -d ProductVersion=$Version `
+    -out $setupMsi
+
+if ($LASTEXITCODE -ne 0) { Write-Error 'WiX build failed.'; exit 1 }
+
+if (-not (Test-Path $setupMsi)) {
+    Write-Error "Expected installer not found: $setupMsi"
     exit 1
 }
 
-Write-Ok "Installer : $setupExe"
+Write-Ok "Installer : $setupMsi"
 Write-Host "`nDone." -ForegroundColor Green

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  qbPortWeaver Windows Installer (MSI) source — WiX Toolset v4.
+
+  Build with:
+    wix build qbPortWeaver.wxs ^
+        -ext WixToolset.UI.wixext ^
+        -ext WixToolset.Util.wixext ^
+        -d ProductVersion=x.y.z ^
+        -out qbPortWeaver_x.y.z_Setup.msi
+
+  Silent install (used by Chocolatey):
+    msiexec /i qbPortWeaver_x.y.z_Setup.msi /qn /norestart
+
+  Silent uninstall:
+    msiexec /x {ProductCode} /qn /norestart
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package
+    Name="qbPortWeaver"
+    Manufacturer="@martsg666"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="{6E2B5A1C-4D89-4F3A-B2C7-9A1E8D5F0C3B}"
+    InstallerVersion="500"
+    Scope="perMachine">
+
+    <!-- Prevent installing an older version over a newer one -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of qbPortWeaver is already installed." />
+
+    <!-- Embed cabinet into the MSI (single-file distribution) -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Add/Remove Programs metadata -->
+    <Icon Id="AppIcon.ico" SourceFile="..\qbPortWeaver.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPHELPLINK"    Value="https://github.com/martsg666/qbPortWeaver" />
+    <Property Id="ARPNOREPAIR"    Value="1" />
+    <Property Id="ARPNOMODIFY"    Value="1" />
+
+    <!-- Kill any running instance before install or uninstall -->
+    <util:CloseApplication Target="qbPortWeaver.exe" CloseMessage="no" RebootPrompt="no" />
+
+    <!-- Minimal UI: license acceptance → progress → finish -->
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <Feature Id="MainFeature" Level="1">
+      <ComponentGroupRef Id="AppComponents" />
+      <ComponentGroupRef Id="ShortcutComponents" />
+    </Feature>
+
+  </Package>
+
+  <!-- -----------------------------------------------------------------------
+       Directory structure
+  ------------------------------------------------------------------------ -->
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="qbPortWeaver" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="StartMenuShortcutFolder" Name="qbPortWeaver" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+  </Fragment>
+
+  <!-- -----------------------------------------------------------------------
+       Application files and shortcuts
+  ------------------------------------------------------------------------ -->
+  <Fragment>
+
+    <!-- Files installed to %ProgramFiles%\qbPortWeaver -->
+    <ComponentGroup Id="AppComponents" Directory="INSTALLFOLDER">
+      <Component Id="AppExecutable">
+        <File Source="..\bin\Release\net10.0-windows\win-x64\publish\qbPortWeaver.exe" />
+      </Component>
+      <Component Id="AppReadme">
+        <File Source="..\README.md" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Shortcuts — backed by per-user registry keys (required by Windows Installer) -->
+    <ComponentGroup Id="ShortcutComponents">
+
+      <Component Id="DesktopShortcutComp" Directory="DesktopFolder">
+        <Shortcut Id="DesktopShortcut"
+                  Name="qbPortWeaver"
+                  Target="[INSTALLFOLDER]qbPortWeaver.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveDesktopFolder" Directory="DesktopFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\qbPortWeaver"
+                       Name="DesktopShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+
+      <Component Id="StartMenuShortcutComp" Directory="StartMenuShortcutFolder">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="qbPortWeaver"
+                  Target="[INSTALLFOLDER]qbPortWeaver.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveStartMenuFolder" Directory="StartMenuShortcutFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\qbPortWeaver"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
