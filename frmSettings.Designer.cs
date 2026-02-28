@@ -41,6 +41,7 @@ namespace qbPortWeaver
             lblDefaultPort           = new Label();
             nudDefaultPort           = new NumericUpDown();
             chkWarnOnInterfaceMismatch = new CheckBox();
+            chkRestartOnDisconnect     = new CheckBox();
 
             grpExtra                 = new GroupBox();
             lblPostUpdateCmd         = new Label();
@@ -115,8 +116,9 @@ namespace qbPortWeaver
             grpQBittorrent.Controls.Add(lblDefaultPort);
             grpQBittorrent.Controls.Add(nudDefaultPort);
             grpQBittorrent.Controls.Add(chkWarnOnInterfaceMismatch);
+            grpQBittorrent.Controls.Add(chkRestartOnDisconnect);
             grpQBittorrent.Location = new Point(8, 104);
-            grpQBittorrent.Size     = new Size(480, 291);
+            grpQBittorrent.Size     = new Size(480, 320);
             grpQBittorrent.TabStop  = false;
             grpQBittorrent.Text     = "qBittorrent";
 
@@ -208,11 +210,17 @@ namespace qbPortWeaver
             chkWarnOnInterfaceMismatch.Text     = "Warn when network interface doesn't match the VPN";
             chkWarnOnInterfaceMismatch.TabIndex = 11;
 
+            // Row 9 — Restart on disconnect
+            chkRestartOnDisconnect.AutoSize = true;
+            chkRestartOnDisconnect.Location = new Point(12, 285);
+            chkRestartOnDisconnect.Text     = "Restart qBittorrent if connection status disconnects";
+            chkRestartOnDisconnect.TabIndex = 12;
+
             // ── grpExtra ──────────────────────────────────────────────────
             grpExtra.Controls.Add(lblPostUpdateCmd);
             grpExtra.Controls.Add(txtPostUpdateCmd);
             grpExtra.Controls.Add(chkDebugMode);
-            grpExtra.Location = new Point(8, 407);
+            grpExtra.Location = new Point(8, 436);
             grpExtra.Size     = new Size(480, 84);
             grpExtra.TabStop  = false;
             grpExtra.Text     = "Extra";
@@ -225,25 +233,25 @@ namespace qbPortWeaver
 
             txtPostUpdateCmd.Location = new Point(148, 24);
             txtPostUpdateCmd.Size     = new Size(320, 23);
-            txtPostUpdateCmd.TabIndex = 12;
+            txtPostUpdateCmd.TabIndex = 13;
 
             // Row 1 — Debug mode
             chkDebugMode.AutoSize = true;
             chkDebugMode.Location = new Point(12, 53);
             chkDebugMode.Text     = "Enable debug logging";
-            chkDebugMode.TabIndex = 13;
+            chkDebugMode.TabIndex = 14;
 
             // ── Buttons ───────────────────────────────────────────────────
-            btnOK.Location     = new Point(308, 503);
+            btnOK.Location     = new Point(308, 532);
             btnOK.Size         = new Size(82, 28);
             btnOK.Text         = "OK";
-            btnOK.TabIndex     = 14;
+            btnOK.TabIndex     = 15;
             btnOK.Click       += btnOK_Click;
 
-            btnCancel.Location     = new Point(400, 503);
+            btnCancel.Location     = new Point(400, 532);
             btnCancel.Size         = new Size(82, 28);
             btnCancel.Text         = "Cancel";
-            btnCancel.TabIndex     = 15;
+            btnCancel.TabIndex     = 16;
             btnCancel.DialogResult = DialogResult.Cancel;
 
             // ── frmSettings ───────────────────────────────────────────────
@@ -251,7 +259,7 @@ namespace qbPortWeaver
             AutoScaleMode       = AutoScaleMode.Font;
             AcceptButton        = btnOK;
             CancelButton        = btnCancel;
-            ClientSize          = new Size(498, 543);
+            ClientSize          = new Size(498, 572);
             Controls.Add(grpGeneral);
             Controls.Add(grpQBittorrent);
             Controls.Add(grpExtra);
@@ -300,6 +308,7 @@ namespace qbPortWeaver
         private Label       lblDefaultPort;
         private NumericUpDown nudDefaultPort;
         private CheckBox    chkWarnOnInterfaceMismatch;
+        private CheckBox    chkRestartOnDisconnect;
 
         private GroupBox    grpExtra;
         private Label       lblPostUpdateCmd;

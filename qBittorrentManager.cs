@@ -204,6 +204,46 @@ namespace qbPortWeaver
             }
         }
 
+        // Returns the connection_status field from /api/v2/transfer/info ("connected", "firewalled", or "disconnected")
+        public async Task<string?> GetConnectionStatusAsync()
+        {
+            if (!await EnsureAuthenticatedAsync().ConfigureAwait(false)) return null;
+
+            try
+            {
+                using var response = await _httpClient.GetAsync($"{_qBittorrentURL}/api/v2/transfer/info").ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    LogManager.Instance.LogMessage($"qBittorrent transfer/info request failed (HTTP {(int)response.StatusCode} {response.StatusCode})", "ERROR");
+                    return null;
+                }
+
+                var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("connection_status", out var statusElement))
+                    return statusElement.GetString();
+
+                LogManager.Instance.LogDebug("qBittorrentManager.GetConnectionStatusAsync: connection_status not found in transfer/info response");
+                return null;
+            }
+            catch (TaskCanceledException)
+            {
+                LogManager.Instance.LogMessage($"qBittorrent Web UI is not reachable (timed out): check the URL in Settings ({_qBittorrentURL})", "ERROR");
+                return null;
+            }
+            catch (HttpRequestException ex)
+            {
+                LogManager.Instance.LogMessage($"qBittorrent Web UI connection failed: {ex.Message} - check the URL in Settings ({_qBittorrentURL})", "ERROR");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                LogManager.Instance.LogDebug($"qBittorrentManager.GetConnectionStatusAsync: {ex.Message}");
+                return null;
+            }
+        }
+
         public void Dispose() => _httpClient.Dispose();
 
         // Authenticates once per instance; subsequent calls reuse the existing session cookie
