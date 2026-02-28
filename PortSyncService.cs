@@ -27,6 +27,7 @@ namespace qbPortWeaver
             bool ForceStartQBittorrent,
             int DefaultPort,
             bool WarnOnInterfaceMismatch,
+            bool RestartOnDisconnect,
             string PostUpdateCmd
         );
 
@@ -36,7 +37,8 @@ namespace qbPortWeaver
             bool Restart,
             string PostUpdateCmd,
             string? VpnProviderName,
-            bool WarnOnInterfaceMismatch
+            bool WarnOnInterfaceMismatch,
+            bool RestartOnDisconnect
         );
 
         // Main port update logic, returns update interval in seconds
@@ -160,7 +162,8 @@ namespace qbPortWeaver
                     Restart:                 cfg.RestartQBittorrent,
                     PostUpdateCmd:           cfg.PostUpdateCmd,
                     VpnProviderName:         vpnProviderName,
-                    WarnOnInterfaceMismatch: warnOnInterfaceMismatch),
+                    WarnOnInterfaceMismatch: warnOnInterfaceMismatch,
+                    RestartOnDisconnect:     cfg.RestartOnDisconnect),
                 status);
 
             return cfg.UpdateInterval;
@@ -179,6 +182,8 @@ namespace qbPortWeaver
                 defaultPort = 0;
             if (!bool.TryParse(RegistrySettingsManager.GetValue("qBittorrent", "warnOnInterfaceMismatch"), out bool warnOnInterfaceMismatch))
                 warnOnInterfaceMismatch = true;
+            if (!bool.TryParse(RegistrySettingsManager.GetValue("qBittorrent", "restartOnDisconnect"), out bool restartOnDisconnect))
+                restartOnDisconnect = false;
 
             return new AppConfig(
                 VpnProvider:            RegistrySettingsManager.GetValue("general",     "vpnProvider"),
@@ -192,6 +197,7 @@ namespace qbPortWeaver
                 ForceStartQBittorrent:  forceStartQBittorrent,
                 DefaultPort:            defaultPort,
                 WarnOnInterfaceMismatch: warnOnInterfaceMismatch,
+                RestartOnDisconnect:    restartOnDisconnect,
                 PostUpdateCmd:          RegistrySettingsManager.GetValue("extra",        "postUpdateCmd")
             );
         }
@@ -227,6 +233,12 @@ namespace qbPortWeaver
                 if (!await ApplyPortUpdateAsync(qBittorrentMgr, targetPort, config, status))
                     return;
             }
+
+            // Check connection status and restart if offline — skip if a restart was already performed
+            // by ApplyPortUpdateAsync (port changed + restart enabled) to avoid a redundant cycle.
+            bool alreadyRestarted = config.Restart && status["portChanged"] is true;
+            if (config.RestartOnDisconnect && !alreadyRestarted)
+                await CheckAndRestartIfDisconnectedAsync(qBittorrentMgr);
 
             SetCompleted(status, true, "Completed successfully");
         }
@@ -346,6 +358,28 @@ namespace qbPortWeaver
             {
                 LogManager.Instance.LogMessage($"Post-update command failed: {ex.Message}", "ERROR");
             }
+        }
+
+        // Polls /api/v2/transfer/info and restarts qBittorrent if connection_status is "disconnected"
+        private static async Task CheckAndRestartIfDisconnectedAsync(qBittorrentManager qBittorrentMgr)
+        {
+            string? connectionStatus = await qBittorrentMgr.GetConnectionStatusAsync();
+            if (connectionStatus == null)
+            {
+                LogManager.Instance.LogDebug("PortSyncService.CheckAndRestartIfDisconnectedAsync: could not retrieve connection status, skipping");
+                return;
+            }
+
+            LogManager.Instance.LogMessage($"qBittorrent connection status: {connectionStatus}", "INFO");
+
+            if (!connectionStatus.Equals("disconnected", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            LogManager.Instance.LogMessage("qBittorrent connection status is disconnected — restarting", "WARN");
+            if (!await qBittorrentMgr.RestartAsync())
+                LogManager.Instance.LogMessage("Failed to restart qBittorrent after connection disconnect", "ERROR");
+            else
+                LogManager.Instance.LogMessage("Successfully restarted qBittorrent after connection disconnect", "INFO");
         }
 
         // Sets the completion status and logs the message
