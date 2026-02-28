@@ -6,7 +6,8 @@ namespace qbPortWeaver
     {
         // Application metadata
         public const string APP_NAME = "qbPortWeaver";
-        public const string APP_VERSION = "2.2.0";
+        public static readonly string APP_VERSION =
+            System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
 
         // Timing
         public const int DEFAULT_UPDATE_INTERVAL_SECONDS = 180;
