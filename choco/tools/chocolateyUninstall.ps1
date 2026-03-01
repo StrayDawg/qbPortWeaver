@@ -3,17 +3,18 @@ $ErrorActionPreference = 'Stop'
 $packageArgs = @{
   packageName    = $env:ChocolateyPackageName
   softwareName   = 'qbPortWeaver*'
-  fileType       = 'exe'
-  # NSIS silent uninstall flag
-  silentArgs     = '/S'
-  validExitCodes = @(0)
+  fileType       = 'msi'
+  # MSI silent uninstall flags: /qn = no UI, /norestart = suppress reboot prompt
+  silentArgs     = '/qn /norestart'
+  validExitCodes = @(0, 3010, 1641)
 }
 
 [array]$key = Get-UninstallRegistryKey -SoftwareName $packageArgs['softwareName']
 
 if ($key.Count -eq 1) {
   $key | ForEach-Object {
-    $packageArgs['file'] = $_.UninstallString
+    # For MSI packages the registry key name IS the ProductCode GUID
+    $packageArgs['file'] = $_.PSChildName
     Uninstall-ChocolateyPackage @packageArgs
   }
 } elseif ($key.Count -eq 0) {

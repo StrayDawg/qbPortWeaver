@@ -30,6 +30,12 @@ namespace qbPortWeaver
             toolTip.SetToolTip(nudDefaultPort,               "Port to apply when the VPN is disconnected (0 = do nothing when disconnected)");
             toolTip.SetToolTip(lblDefaultPort,               "Port to apply when the VPN is disconnected (0 = do nothing when disconnected)");
             toolTip.SetToolTip(chkWarnOnInterfaceMismatch,   "Show a warning when qBittorrent's network interface does not match the configured VPN provider");
+            toolTip.SetToolTip(chkRestartOnDisconnect,
+                "When enabled, qBittorrent is automatically restarted whenever its connection " +
+                "status transitions to offline. The status is determined by polling the qBittorrent " +
+                "Web API (/api/v2/transfer/info) at each sync interval. This can help recover from " +
+                "network disruptions or routing failures that leave qBittorrent running but unable " +
+                "to reach peers. Requires the Executable path and Process name fields to be configured.");
             toolTip.SetToolTip(txtPostUpdateCmd,             "Shell command to run after a successful port update (leave empty to disable)");
             toolTip.SetToolTip(chkDebugMode,                 "Write verbose debug entries to the log file");
         }
@@ -56,6 +62,7 @@ namespace qbPortWeaver
             chkRestartQBittorrent.Checked      = RegistrySettingsManager.GetValue("qBittorrent", "restartqBittorrent").Equals("True", StringComparison.OrdinalIgnoreCase);
             chkForceStartQBittorrent.Checked   = RegistrySettingsManager.GetValue("qBittorrent", "forceStartqBittorrent").Equals("True", StringComparison.OrdinalIgnoreCase);
             chkWarnOnInterfaceMismatch.Checked = RegistrySettingsManager.GetValue("qBittorrent", "warnOnInterfaceMismatch").Equals("True", StringComparison.OrdinalIgnoreCase);
+            chkRestartOnDisconnect.Checked     = RegistrySettingsManager.GetValue("qBittorrent", "restartOnDisconnect").Equals("True", StringComparison.OrdinalIgnoreCase);
 
             if (int.TryParse(RegistrySettingsManager.GetValue("qBittorrent", "defaultPort"), out int defaultPort))
                 nudDefaultPort.Value = Math.Clamp(defaultPort, (int)nudDefaultPort.Minimum, (int)nudDefaultPort.Maximum);
@@ -89,6 +96,7 @@ namespace qbPortWeaver
             RegistrySettingsManager.SetValue("qBittorrent", "forceStartqBittorrent",   chkForceStartQBittorrent.Checked   ? "True" : "False");
             RegistrySettingsManager.SetValue("qBittorrent", "defaultPort",             ((int)nudDefaultPort.Value).ToString());
             RegistrySettingsManager.SetValue("qBittorrent", "warnOnInterfaceMismatch", chkWarnOnInterfaceMismatch.Checked ? "True" : "False");
+            RegistrySettingsManager.SetValue("qBittorrent", "restartOnDisconnect",     chkRestartOnDisconnect.Checked     ? "True" : "False");
 
             // Extra
             RegistrySettingsManager.SetValue("extra", "postUpdateCmd", txtPostUpdateCmd.Text.Trim());

@@ -27,7 +27,8 @@ namespace qbPortWeaver
                     ["restartqBittorrent"]      = "True",
                     ["forceStartqBittorrent"]   = "False",
                     ["defaultPort"]             = "0",
-                    ["warnOnInterfaceMismatch"] = "True"
+                    ["warnOnInterfaceMismatch"] = "True",
+                    ["restartOnDisconnect"]     = "False"
                 },
                 ["extra"] = new(StringComparer.OrdinalIgnoreCase)
                 {
