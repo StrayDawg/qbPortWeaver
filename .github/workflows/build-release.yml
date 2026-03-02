@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build (e.g. v2.2.0)'
+        description: 'Release tag to build (e.g. v2.3.0)'
         required: true
         type: string
 
@@ -50,6 +50,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       # -----------------------------------------------------------------------
       # 3. Publish the .NET application (self-contained single-file, version stamped from the tag)
@@ -76,11 +77,11 @@ jobs:
 
       # -----------------------------------------------------------------------
       # 4. Build the MSI installer using WiX Toolset v4 (pinned to latest 4.0.x)
-      # -----------------------------------------------------------------------  
+      # -----------------------------------------------------------------------
       - name: Install WiX Toolset
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version "4.*"
+          dotnet tool install --global wix --version "4.0.6"
           wix extension add WixToolset.UI.wixext/4.0.6 WixToolset.Util.wixext/4.0.6 --global
           wix --version
 
@@ -96,6 +97,7 @@ jobs:
             -arch x64 `
             -ext WixToolset.UI.wixext `
             -ext WixToolset.Util.wixext `
+            -b installer\ `
             -d ProductVersion=$version `
             -out "installer\qbPortWeaver_${version}_Setup.msi"
 

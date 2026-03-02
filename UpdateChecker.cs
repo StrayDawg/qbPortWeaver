@@ -117,7 +117,5 @@ namespace qbPortWeaver
             client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppConstants.APP_NAME, version));
             return client;
         }
-
-
     }
 }

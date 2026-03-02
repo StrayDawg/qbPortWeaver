@@ -35,17 +35,23 @@ The application runs in the system tray, manages configuration and logging, and 
 - **Last-Run Status File**
   Writes a JSON status file (`qbPortWeaver.status.json`) after each sync cycle, exposing VPN port, qBittorrent port, timestamps, and completion status for external scripts.
 
-- **Post-Update Command**
-  Optionally run a custom command after a successful port update (fire-and-forget). See SampleSendMail.ps1 for an example of sending an email notification with status details.
+- **Restart qBittorrent After Port Change**
+  Optionally restart qBittorrent after updating the port to ensure changes take effect immediately.
 
-- **VPN Interface Mismatch Warning**
-  Shows a tray balloon tip and logs a warning if qBittorrent's network interface does not match the configured VPN provider, or if qBittorrent is bound to all interfaces (which may cause traffic leaks).
+- **Force Start qBittorrent**
+  Optionally force start qBittorrent if it is not running.
 
 - **Default Port Fallback**
   When VPN is not connected, optionally sets qBittorrent's listening port to a configured default. Useful if you have a port forwarded in your router for direct connections without VPN.
 
-- **Force Start qBittorrent**
-  Optionally force start qBittorrent if it is not running.
+- **VPN Interface Mismatch Warning**
+  Shows a tray balloon tip and logs a warning if qBittorrent's network interface does not match the configured VPN provider, or if qBittorrent is bound to all interfaces (which may cause traffic leaks).
+
+- **Restart qBittorrent on Disconnect**
+  Optionally restart qBittorrent when its connection status changes to disconnected. Requires the Executable and Process name to be configured.
+
+- **Post-Update Command**
+  Optionally run a custom command after a successful port update (fire-and-forget). See SampleSendMail.ps1 for an example of sending an email notification with status details.
 
 - **Automatic Update Checker**
   Checks GitHub for new releases on startup and every 12 hours, and offers to open the download page. The **About** dialog (tray menu → About) also shows the current and latest version, update status, and contributor links.
@@ -76,6 +82,7 @@ On first run, all settings are initialized with sensible defaults.
 | Force start if not running | Automatically launch qBittorrent if it is not running | `False` |
 | Default port (0 = disabled) | Fallback port to apply when VPN is not connected | `0` |
 | Warn on interface mismatch | Warn if qBittorrent's network interface doesn't match the VPN | `True` |
+| Restart on disconnect | Restart qBittorrent when its connection status changes to disconnected (requires Executable and Process name) | `False` |
 | Post-update command | Command to run after a successful port update (leave empty to disable) | — |
 | Debug logging | Enable verbose debug logging to the log file | `False` |
 
@@ -238,7 +245,7 @@ The modular architecture makes it easy to:
    git tag v2.3.0 origin/2.3.0
    git push origin v2.3.0
    ```
-   Pushing the tag automatically triggers the **Build, Release, and Publish** pipeline, which builds the app, compiles the NSIS installer, creates the GitHub Release, and publishes to Chocolatey.
+   Pushing the tag automatically triggers the **Build, Release, and Publish** pipeline, which builds the app, compiles the MSI installer, creates the GitHub Release, and publishes to Chocolatey.
 
 4. **Merge the release branch into `master`** after the pipeline completes successfully:
    ```
@@ -256,6 +263,8 @@ The modular architecture makes it easy to:
 ---
 
 ## Changelog
+
+### Future changes can be found in [GitHub Releases]
 
 ### 2.2.0
 - Removed legacy INI file migration code — v2.0.0 is the required baseline for upgrading

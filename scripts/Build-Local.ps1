@@ -12,7 +12,7 @@
     the WiX source expects under bin\Release\net10.0-windows\win-x64\publish\.
 
     WiX Toolset v4 must be installed as a .NET global tool:
-      dotnet tool install --global wix --version "4.*"
+      dotnet tool install --global wix --version "4.0.6"
       wix extension add WixToolset.UI.wixext/4.0.6 WixToolset.Util.wixext/4.0.6 --global
 
 .PARAMETER Version
@@ -98,7 +98,7 @@ Write-Step 'Building MSI installer with WiX Toolset v4...'
 # Ensure WiX is installed
 if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     Write-Host '    Installing WiX Toolset v4...' -ForegroundColor Yellow
-    dotnet tool install --global wix --version "4.*"
+    dotnet tool install --global wix --version "4.0.6"
     if ($LASTEXITCODE -ne 0) { Write-Error 'Failed to install WiX Toolset.'; exit 1 }
 }
 

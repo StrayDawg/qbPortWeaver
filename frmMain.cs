@@ -37,6 +37,9 @@ namespace qbPortWeaver
         // Periodic update check timer (fires every 12 hours)
         private System.Windows.Forms.Timer _updateCheckTimer = null!;
 
+        // Last version for which the user was already shown an update prompt
+        private string? _lastNotifiedVersion;
+
         public frmMain()
         {
             InitializeComponent();
@@ -184,6 +187,13 @@ namespace qbPortWeaver
                     // Remove leading 'v' or 'V' from version if present
                     var versionText = update.Value.Version.TrimStart('v', 'V');
 
+                    if (versionText == _lastNotifiedVersion)
+                    {
+                        LogManager.Instance.LogMessage($"New version {versionText} available (already notified)", "INFO");
+                        return;
+                    }
+
+                    _lastNotifiedVersion = versionText;
                     LogManager.Instance.LogMessage($"New application version available: {versionText}", "INFO");
                     var result = MessageBox.Show(
                         $"A new version of {AppConstants.APP_NAME} is available: {versionText}\n\nWould you like to open the download page?",
