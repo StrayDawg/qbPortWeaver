@@ -181,9 +181,12 @@ namespace qbPortWeaver
                 var update = await UpdateChecker.CheckForUpdateAsync();
                 if (update.HasValue)
                 {
-                    LogManager.Instance.LogMessage($"New application version available: {update.Value.Version}", "INFO");
+                    // Remove leading 'v' or 'V' from version if present
+                    var versionText = update.Value.Version.TrimStart('v', 'V');
+
+                    LogManager.Instance.LogMessage($"New application version available: {versionText}", "INFO");
                     var result = MessageBox.Show(
-                        $"A new version of {AppConstants.APP_NAME} is available: {update.Value.Version}\n\nWould you like to open the download page?",
+                        $"A new version of {AppConstants.APP_NAME} is available: {versionText}\n\nWould you like to open the download page?",
                         $"{AppConstants.APP_NAME} - Update Available",
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Information);
