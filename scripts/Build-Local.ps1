@@ -12,12 +12,12 @@
     the WiX source expects under bin\Release\net10.0-windows\win-x64\publish\.
 
     WiX Toolset v4 must be installed as a .NET global tool:
-      dotnet tool install --global wix
-      wix extension add WixToolset.UI.wixext WixToolset.Util.wixext
+      dotnet tool install --global wix --version "4.0.6"
+      wix extension add WixToolset.UI.wixext/4.0.6 WixToolset.Util.wixext/4.0.6 --global
 
 .PARAMETER Version
     The version string to stamp into the build (e.g. '2.3.0').
-    Defaults to the version defined in AppConstants.cs.
+    Defaults to the version defined in qbPortWeaver.csproj.
 
 .EXAMPLE
     # Build using the default version from AppConstants.cs
@@ -47,10 +47,10 @@ function Write-Ok([string]$msg)   { Write-Host "    $msg"   -ForegroundColor Gre
 Write-Step 'Resolving version...'
 
 if (-not $Version) {
-    $constantsPath = Join-Path $repoRoot 'AppConstants.cs'
-    $match = Select-String -Path $constantsPath -Pattern 'APP_VERSION\s*=\s*"([^"]+)"'
+    $csprojPath = Join-Path $repoRoot 'qbPortWeaver.csproj'
+    $match = Select-String -Path $csprojPath -Pattern '<Version>([^<]+)</Version>'
     if (-not $match) {
-        Write-Error "Could not find APP_VERSION in AppConstants.cs. Pass -Version explicitly."
+        Write-Error "Could not find <Version> in qbPortWeaver.csproj. Pass -Version explicitly."
         exit 1
     }
     $Version = $match.Matches[0].Groups[1].Value
@@ -98,19 +98,23 @@ Write-Step 'Building MSI installer with WiX Toolset v4...'
 # Ensure WiX is installed
 if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     Write-Host '    Installing WiX Toolset v4...' -ForegroundColor Yellow
-    dotnet tool install --global wix
+    dotnet tool install --global wix --version "4.0.6"
     if ($LASTEXITCODE -ne 0) { Write-Error 'Failed to install WiX Toolset.'; exit 1 }
 }
 
-# Install required extensions (safe to run if already present)
-wix extension add WixToolset.UI.wixext WixToolset.Util.wixext 2>&1 | Out-Null
+# Install required extensions pinned to v4 (safe to run if already present)
+wix extension add WixToolset.UI.wixext/4.0.6 WixToolset.Util.wixext/4.0.6 --global
+if ($LASTEXITCODE -ne 0) { Write-Error 'Failed to install WiX extensions.'; exit 1 }
 
-$wxsFile  = Join-Path $repoRoot 'installer\qbPortWeaver.wxs'
-$setupMsi = Join-Path $repoRoot "installer\qbPortWeaver_${Version}_Setup.msi"
+$wxsFile      = Join-Path $repoRoot 'installer\qbPortWeaver.wxs'
+$installerDir = Join-Path $repoRoot 'installer'
+$setupMsi     = Join-Path $repoRoot "installer\qbPortWeaver_${Version}_Setup.msi"
 
 wix build $wxsFile `
+    -arch x64 `
     -ext WixToolset.UI.wixext `
     -ext WixToolset.Util.wixext `
+    -b $installerDir `
     -d ProductVersion=$Version `
     -out $setupMsi
 
