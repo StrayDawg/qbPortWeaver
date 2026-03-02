@@ -93,6 +93,7 @@ jobs:
           $version = $env:BUILD_VERSION
 
           wix build installer\qbPortWeaver.wxs `
+            -arch x64 `
             -ext WixToolset.UI.wixext `
             -ext WixToolset.Util.wixext `
             -d ProductVersion=$version `
