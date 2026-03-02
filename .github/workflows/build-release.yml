@@ -75,13 +75,13 @@ jobs:
             /p:AssemblyVersion="$v.0"
 
       # -----------------------------------------------------------------------
-      # 4. Build the MSI installer using WiX Toolset v4
-      # -----------------------------------------------------------------------
+      # 4. Build the MSI installer using WiX Toolset v4 (pinned to latest 4.0.x)
+      # -----------------------------------------------------------------------  
       - name: Install WiX Toolset
         shell: pwsh
         run: |
-          dotnet tool install --global wix
-          wix extension add WixToolset.UI.wixext WixToolset.Util.wixext
+          dotnet tool install --global wix --version "4.*"
+          wix extension add WixToolset.UI.wixext/4.0.6 WixToolset.Util.wixext/4.0.6 --global
           wix --version
 
       - name: Build MSI installer
