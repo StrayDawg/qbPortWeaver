@@ -1,24 +1,25 @@
-﻿using System.Net.NetworkInformation;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace qbPortWeaver
 {
     // Detects ProtonVPN connectivity via network adapter enumeration and reads the forwarded port from ProtonVPN's log file
-    public sealed class ProtonVPNManager : IVPNManager
+    public sealed class ProtonVPNManager : IVpnManager
     {
+        private const int LogReadChunkSize = 4096;
+
         private readonly string _logFilePath;
         private static readonly Regex PortRegex = new Regex(@"Port pair\s+(\d+)->(?:\d+)", RegexOptions.Compiled);
 
-        public string ProviderName => "ProtonVPN";
+        public string ProviderName => RegistrySettingsManager.VpnProviderProtonVpn;
 
         public ProtonVPNManager(string logFilePath)
         {
             _logFilePath = logFilePath;
         }
 
-        // Checks if ProtonVPN network adapter is connected
-        public bool IsVPNConnected()
+        public bool IsVpnConnected()
         {
             try
             {
@@ -28,52 +29,50 @@ namespace qbPortWeaver
                     adapter.OperationalStatus == OperationalStatus.Up);
 
                 LogManager.Instance.LogDebug(isConnected
-                    ? "ProtonVPNManager.IsVPNConnected: ProtonVPN adapter is connected"
-                    : "ProtonVPNManager.IsVPNConnected: ProtonVPN adapter not found or not connected");
+                    ? "ProtonVPNManager.IsVpnConnected: ProtonVPN adapter is connected"
+                    : "ProtonVPNManager.IsVpnConnected: ProtonVPN adapter not found or not connected");
 
                 return isConnected;
             }
             catch (Exception ex)
             {
-                LogManager.Instance.LogDebug($"ProtonVPNManager.IsVPNConnected: {ex.Message}");
+                LogManager.Instance.LogDebug($"ProtonVPNManager.IsVpnConnected: {ex.Message}");
                 return false;
             }
         }
 
-        // Reads the ProtonVPN logfile to find the current port
-        public int? GetVPNPort()
+        public int? GetVpnPort()
         {
             try
             {
-                // Validate logfile path
                 if (string.IsNullOrWhiteSpace(_logFilePath))
                 {
-                    LogManager.Instance.LogDebug("ProtonVPNManager.GetVPNPort: Logfile path is null or empty");
+                    LogManager.Instance.LogDebug("ProtonVPNManager.GetVpnPort: Logfile path is null or empty");
                     return null;
                 }
 
                 if (!File.Exists(_logFilePath))
                 {
-                    LogManager.Instance.LogDebug($"ProtonVPNManager.GetVPNPort: Logfile does not exist: {_logFilePath}");
+                    LogManager.Instance.LogDebug($"ProtonVPNManager.GetVpnPort: Logfile does not exist: {_logFilePath}");
                     return null;
                 }
 
-                LogManager.Instance.LogDebug($"ProtonVPNManager.GetVPNPort: Reading logfile: {_logFilePath}");
+                LogManager.Instance.LogDebug($"ProtonVPNManager.GetVpnPort: Reading logfile: {_logFilePath}");
 
                 int? port = ReadLastPortFromLog();
 
                 if (port.HasValue)
                 {
-                    LogManager.Instance.LogDebug($"ProtonVPNManager.GetVPNPort: Found port {port.Value} in logfile");
+                    LogManager.Instance.LogDebug($"ProtonVPNManager.GetVpnPort: Found port {port.Value} in logfile");
                     return port.Value;
                 }
 
-                LogManager.Instance.LogDebug("ProtonVPNManager.GetVPNPort: No port found in logfile");
+                LogManager.Instance.LogDebug("ProtonVPNManager.GetVpnPort: No port found in logfile");
                 return null;
             }
             catch (Exception ex)
             {
-                LogManager.Instance.LogDebug($"ProtonVPNManager.GetVPNPort: {ex.Message}");
+                LogManager.Instance.LogDebug($"ProtonVPNManager.GetVpnPort: {ex.Message}");
                 return null;
             }
         }
@@ -82,16 +81,15 @@ namespace qbPortWeaver
         // Opens with FileShare.ReadWrite so ProtonVPN can keep writing while we read.
         private int? ReadLastPortFromLog()
         {
-            const int CHUNK_SIZE = 4096;
             using var fs = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 
             long bytesRemaining = fs.Length;
             string lineFragment = string.Empty;
-            byte[] buffer = new byte[CHUNK_SIZE];
+            byte[] buffer = new byte[LogReadChunkSize];
 
             while (bytesRemaining > 0)
             {
-                int chunkSize = (int)Math.Min(CHUNK_SIZE, bytesRemaining);
+                int chunkSize = (int)Math.Min(LogReadChunkSize, bytesRemaining);
                 bytesRemaining -= chunkSize;
                 fs.Seek(bytesRemaining, SeekOrigin.Begin);
                 fs.ReadExactly(buffer, 0, chunkSize);

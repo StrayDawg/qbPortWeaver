@@ -2,10 +2,18 @@
 
 ## Overview
 
-**qbPortWeaver** is a Windows application designed to synchronize the listening port of **qBittorrent** with the port assigned by your VPN provider (**ProtonVPN** or **Private Internet Access**).
+**qbPortWeaver** is a Windows application designed to synchronize the listening port of **qBittorrent** with the port assigned by your VPN provider (**ProtonVPN**, **Private Internet Access**, or any **NAT-PMP capable VPN adapter or router**).
 This ensures your torrent client always uses the VPN-provided port, improving privacy and connectivity.
 
 The application runs in the system tray, manages configuration and logging, and automatically updates qBittorrent's port when changes are detected.
+
+---
+
+## Requirements
+
+- Windows 10/11 (x64)
+- ProtonVPN, Private Internet Access (PIA), or any NAT-PMP capable VPN or router with port forwarding enabled
+- qBittorrent installed with Web UI enabled
 
 ---
 
@@ -21,7 +29,7 @@ The application runs in the system tray, manages configuration and logging, and 
   Detects the current VPN port and updates qBittorrent's listening port automatically.
 
 - **Multi-VPN Support**
-  Supports **ProtonVPN** (via log file parsing) and **Private Internet Access** (via `piactl` CLI). Configurable through the Settings dialog.
+  Supports **ProtonVPN** (via log file parsing or NAT-PMP), **Private Internet Access** (via `piactl` CLI), and any **NAT-PMP capable VPN adapter or router** (via RFC 6886 UDP port mapping). Configurable through the Settings dialog.
 
 - **Settings Dialog**
   All configuration options are editable through a dedicated Settings form (tray menu → Settings), with inline descriptions and tooltips for each option.
@@ -71,7 +79,8 @@ On first run, all settings are initialized with sensible defaults.
 
 | Setting | Description | Default |
 |---|---|---|
-| VPN Provider | `ProtonVPN` or `PIA` | `ProtonVPN` |
+| VPN Provider | `ProtonVPN`, `PIA`, or `NAT-PMP` | `ProtonVPN` |
+| NAT-PMP Adapter | Network adapter to use for NAT-PMP port mapping (only shown when NAT-PMP is selected) | — |
 | Update interval | How often to check and sync the port (seconds) | `180` |
 | URL | qBittorrent Web API URL | `http://127.0.0.1:8080` |
 | Username | qBittorrent Web UI username | `admin` |
@@ -93,11 +102,7 @@ On first run, all settings are initialized with sensible defaults.
 ### Startup
 
 - The application starts minimized and runs in the system tray.
-
-### Configuration
-
-- On first run, all settings are initialized with defaults.
-- Open **Settings** from the tray menu to configure the application.
+- On first run, open **Settings** from the tray menu to configure the application.
 
 ### Synchronization Loop
 
@@ -123,51 +128,6 @@ On first run, all settings are initialized with sensible defaults.
 
 ---
 
-## Logging
-
-- All actions and errors are logged to `qbPortWeaver.log`.
-- Log files are automatically rotated when exceeding **5 MB**, keeping up to 3 files (current + 2 backups).
-
----
-
-## Error Handling
-
-- If the VPN provider is not connected or the port cannot be determined, the issue is logged and the update is skipped.
-- If qBittorrent is not running and cannot be force started or updated, errors are logged and the loop continues after the next interval.
-
----
-
-## Extensibility
-
-The modular architecture makes it easy to:
-
-- Add support for other VPN providers
-- Integrate additional torrent clients
-- Extend configuration or logging features
-
----
-
-## Example Workflow
-
-1. User starts **qbPortWeaver**
-2. Application loads settings from the registry
-3. VPN provider status is checked and port retrieved
-4. qBittorrent port is compared and updated if needed
-5. qBittorrent restarts (if enabled)
-6. Post-update command runs (if configured)
-7. Actions are logged
-8. Application waits until the next interval
-
----
-
-## Requirements
-
-- Windows OS
-- ProtonVPN or Private Internet Access (PIA) installed and running
-- qBittorrent installed with Web API enabled
-
----
-
 ## Recommended Setup
 
 ### 1. BIOS Configuration
@@ -186,7 +146,9 @@ The modular architecture makes it easy to:
 - Enable **NetShield**.
 - Use **OpenVPN (UDP)** as the protocol to avoid DNS resolution issues that can occur with WireGuard.
 - Set ProtonVPN to **start with Windows**.
-- Set `VPN Provider` to `ProtonVPN` in qbPortWeaver Settings.
+- Set `VPN Provider` to `ProtonVPN` in qbPortWeaver Settings (reads the forwarded port from the ProtonVPN log file — recommended default).
+
+> **Alternative:** ProtonVPN also supports NAT-PMP. If you prefer not to rely on log file parsing, set `VPN Provider` to `NAT-PMP` instead and select the ProtonVPN virtual adapter in the NAT-PMP Adapter dropdown. See the NAT-PMP Configuration section below.
 
 ### 4. PIA Configuration (if using PIA instead of ProtonVPN)
 
@@ -196,7 +158,25 @@ The modular architecture makes it easy to:
 - Set PIA to **start with Windows**.
 - Set `VPN Provider` to `PIA` in qbPortWeaver Settings.
 
-### 5. qBittorrent Configuration
+### 5. NAT-PMP Configuration
+
+NAT-PMP (RFC 6886) is a protocol for requesting port mappings directly from a gateway. qbPortWeaver supports it in two scenarios:
+
+**With ProtonVPN (alternative to log file parsing):**
+- ProtonVPN supports NAT-PMP natively. You can use this instead of the default log file approach.
+- Enable **Port Forwarding** in ProtonVPN and connect to a P2P server.
+- Set `VPN Provider` to `NAT-PMP` in qbPortWeaver Settings.
+- Select the **ProtonVPN virtual adapter** in the NAT-PMP Adapter dropdown.
+
+**With any other NAT-PMP capable VPN client or router:**
+- The VPN gateway or router must support NAT-PMP (RFC 6886) with port forwarding enabled.
+- Enable **port forwarding** in your VPN client or router settings.
+- Set `VPN Provider` to `NAT-PMP` in qbPortWeaver Settings.
+- Select the correct **network adapter** in the NAT-PMP Adapter dropdown — choose the virtual adapter created by your VPN client, or your LAN adapter if using a NAT-PMP capable router.
+
+> If no adapter appears in the list, ensure the VPN is connected and the adapter is up, then reopen Settings.
+
+### 6. qBittorrent Configuration
 
 - **Disable UPnP/NAT-PMP** port mapping (Options > Connection) since the port is managed by your VPN provider.
 - Enable **Anonymous Mode** (Options > BitTorrent).
@@ -204,10 +184,24 @@ The modular architecture makes it easy to:
 - Bind the **network interface** to your VPN adapter (Options > Advanced > Network Interface) to prevent traffic leaks outside the VPN.
 - Set qBittorrent to **start with Windows**.
 
-### 6. qbPortWeaver
+### 7. qbPortWeaver
 
 - Enable **Start Automatically with Windows** from the tray menu.
 - On first run, open **Settings** from the tray menu and enter your qBittorrent Web UI credentials and preferences.
+
+---
+
+## Logging
+
+- All actions and errors are logged to `qbPortWeaver.log`.
+- Log files are automatically rotated when exceeding **5 MB**, keeping up to 3 files (current + 2 backups).
+
+---
+
+## Error Handling
+
+- If the VPN provider is not connected or the port cannot be determined, the issue is logged and the update is skipped.
+- If qBittorrent is not running and cannot be force started or updated, errors are logged and the loop continues after the next interval.
 
 ---
 
@@ -262,18 +256,19 @@ The modular architecture makes it easy to:
 
 ---
 
+## Extensibility
+
+The modular architecture makes it easy to:
+
+- Add support for other VPN providers
+- Integrate additional torrent clients
+- Extend configuration or logging features
+
+---
+
 ## Changelog
 
-### Future changes can be found in [GitHub Releases]
-
-### 2.2.0
-- Removed legacy INI file migration code — v2.0.0 is the required baseline for upgrading
-- Internal code cleanup and consistency improvements across all modules
-- New **About** dialog (tray menu → About): shows current and latest GitHub release, update status, and contributor links
-- Update checker now also runs every 12 hours in the background, not only on startup
-- Distributed as a **self-contained single-file executable** — no .NET runtime installation required
-- Automated **CI/CD pipeline** via GitHub Actions: pushing a `v*` tag builds the app, compiles the NSIS installer, and publishes a GitHub Release automatically
-- Available on the **Chocolatey Community Repository**: `choco install qbportweaver`
+### v2.2.0 and later — see [GitHub Releases](https://github.com/martsg666/qbPortWeaver/releases)
 
 ### 2.0.0
 - **Tray status indicator**: the tray icon now shows a colored dot (green / orange / red) reflecting the last sync result, and the tooltip shows the current port and status without opening the log file
@@ -327,4 +322,4 @@ The modular architecture makes it easy to:
 Free of use and distribution. No warranty provided.
 
 ## Author
-Developed by @martsg666
+Developed by martsg666

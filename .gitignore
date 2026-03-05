@@ -372,3 +372,6 @@ CLAUDE.md
 installer/*.exe
 installer/*.msi
 installer/*.wixpdb
+
+# Generated Chocolatey package (produced by Build-ChocolateyPackage.ps1)
+choco/*.nupkg

@@ -1,19 +1,17 @@
-using System.Diagnostics;
-
 namespace qbPortWeaver
 {
-    public partial class frmAbout : Form
+    public partial class AboutForm : Form
     {
         // Set to the release URL when an update is available; null when up-to-date or not yet checked
         private string? _releaseUrl;
 
-        public frmAbout()
+        public AboutForm()
         {
             InitializeComponent();
-            lblAppVersion.Text         = $"Version {AppConstants.APP_VERSION}";
-            lblCurrentVersionValue.Text = AppConstants.APP_VERSION;
-            lnkGitHub.Text             = $"{AppConstants.GITHUB_REPO_OWNER}/{AppConstants.APP_NAME}";
-            Text                       = $"{AppConstants.APP_NAME} | About";
+            lblAppVersion.Text          = $"Version {AppConstants.AppVersion}";
+            lblCurrentVersionValue.Text = AppConstants.AppVersion;
+            lnkGitHub.Text              = $"{AppConstants.GitHubRepoOwner}/{AppConstants.AppName}";
+            Text                        = $"{AppConstants.AppName} | About";
         }
 
         // Kick off the GitHub data fetch as fire-and-forget; the IsDisposed guard in the async method handles early close
@@ -21,8 +19,32 @@ namespace qbPortWeaver
         {
             base.OnLoad(e);
             _ = LoadGitHubDataAsync().ContinueWith(
-                t => LogManager.Instance.LogDebug($"frmAbout.LoadGitHubDataAsync: {t.Exception?.GetBaseException().Message}"),
+                t => LogManager.Instance.LogDebug($"AboutForm.LoadGitHubDataAsync: {t.Exception?.GetBaseException().Message}"),
                 TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        // Opens the release page if an update is available; otherwise re-runs the update check
+        private void btnCheckForUpdates_Click(object? sender, EventArgs e)
+        {
+            if (_releaseUrl != null)
+                AppConstants.OpenUrl(_releaseUrl);
+            else
+                _ = LoadGitHubDataAsync().ContinueWith(
+                    t => LogManager.Instance.LogDebug($"AboutForm.LoadGitHubDataAsync: {t.Exception?.GetBaseException().Message}"),
+                    TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        // Each link region carries its contributor profile URL as LinkData
+        private void lnkAuthor_LinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)
+        {
+            if (e.Link?.LinkData is string url && !string.IsNullOrEmpty(url))
+                AppConstants.OpenUrl(url);
+        }
+
+        // Opens the project repository in the default browser
+        private void lnkGitHub_LinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)
+        {
+            AppConstants.OpenUrl(AppConstants.GitHubRepoUrl);
         }
 
         // Fetches the latest release info and contributor list in parallel, then populates all UI fields
@@ -35,7 +57,7 @@ namespace qbPortWeaver
             lblStatusValue.Text             = "";
             _releaseUrl                     = null;
 
-            // Fetch release info and release commit authors in parallel
+            // Fetch release info and contributor list in parallel
             var releaseTask      = UpdateChecker.GetLatestReleaseInfoAsync();
             var contributorsTask = UpdateChecker.GetReleaseContributorsAsync();
             await Task.WhenAll(releaseTask, contributorsTask);
@@ -48,7 +70,7 @@ namespace qbPortWeaver
             if (contributors.Count > 0)
                 SetContributorLinks(contributors);
             else
-                lnkAuthor.Text = AppConstants.GITHUB_REPO_OWNER;
+                lnkAuthor.Text = AppConstants.GitHubRepoOwner;
 
             // ── Version / update status ───────────────────────────────────
             var info = releaseTask.Result;
@@ -62,7 +84,7 @@ namespace qbPortWeaver
             }
             else
             {
-                lblLatestVersionValue.Text      = info.TagName.TrimStart('v', 'V');
+                lblLatestVersionValue.Text      = info.VersionString;
                 lblLatestVersionValue.ForeColor = SystemColors.ControlText;
 
                 if (info.IsNewer)
@@ -84,16 +106,9 @@ namespace qbPortWeaver
         }
 
         // Populates lnkAuthor with one clickable link region per contributor
-        private void SetContributorLinks(IReadOnlyList<UpdateChecker.ContributorInfo> contributors)
+        private void SetContributorLinks(IReadOnlyList<ContributorInfo> contributors)
         {
-            var sb = new System.Text.StringBuilder();
-            for (int i = 0; i < contributors.Count; i++)
-            {
-                if (i > 0) sb.Append(", ");
-                sb.Append(contributors[i].Login);
-            }
-
-            lnkAuthor.Text = sb.ToString();
+            lnkAuthor.Text = string.Join(", ", contributors.Select(c => c.Login));
             lnkAuthor.Links.Clear();
 
             int offset = 0;
@@ -101,41 +116,6 @@ namespace qbPortWeaver
             {
                 lnkAuthor.Links.Add(offset, c.Login.Length, c.ProfileUrl);
                 offset += c.Login.Length + 2; // +2 for ", "
-            }
-        }
-
-        // Opens the release page if an update is available; otherwise re-runs the update check
-        private void btnCheckForUpdates_Click(object? sender, EventArgs e)
-        {
-            if (_releaseUrl != null)
-                OpenUrl(_releaseUrl);
-            else
-                _ = LoadGitHubDataAsync();
-        }
-
-        // Each link region carries its contributor profile URL as LinkData
-        private void lnkAuthor_LinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)
-        {
-            if (e.Link?.LinkData is string url && !string.IsNullOrEmpty(url))
-                OpenUrl(url);
-        }
-
-        // Opens the project repository in the default browser
-        private void lnkGitHub_LinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)
-        {
-            OpenUrl(AppConstants.GITHUB_REPO_URL);
-        }
-
-        // Opens a URL in the default browser; UseShellExecute is required for shell-handled URLs
-        private static void OpenUrl(string url)
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                LogManager.Instance.LogDebug($"frmAbout.OpenUrl: {ex.Message}");
             }
         }
     }

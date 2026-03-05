@@ -3,29 +3,28 @@
     Builds a local qbPortWeaver MSI installer for testing purposes.
 
 .DESCRIPTION
-    Mirrors the CI build-release workflow locally:
+    Mirrors the CI build-release-publish.yml pipeline locally:
       1. Publishes the .NET app as a self-contained single-file win-x64 executable
       2. Builds the MSI installer using WiX Toolset v4
 
-    Use this script before building the MSI locally — a regular Visual Studio
+    Use this script to build the MSI locally — a regular Visual Studio
     Release build does NOT produce the self-contained single-file output that
-    the WiX source expects under bin\Release\net10.0-windows\win-x64\publish\.
+    the WiX source expects under bin\Release\<tfm>\win-x64\publish\.
 
-    WiX Toolset v4 must be installed as a .NET global tool:
-      dotnet tool install --global wix --version "4.0.6"
-      wix extension add WixToolset.UI.wixext/4.0.6 WixToolset.Util.wixext/4.0.6 --global
+    WiX Toolset v4 is installed/updated automatically by this script.
+    To install manually: dotnet tool update --global wix --version "4.0.6"
 
 .PARAMETER Version
     The version string to stamp into the build (e.g. '2.3.0').
     Defaults to the version defined in qbPortWeaver.csproj.
 
 .EXAMPLE
-    # Build using the default version from AppConstants.cs
-    .\scripts\Build-Local.ps1
+    # Build using the default version from qbPortWeaver.csproj
+    .\scripts\Build-LocalMsi.ps1
 
 .EXAMPLE
     # Build with an explicit version override
-    .\scripts\Build-Local.ps1 -Version 2.3.0
+    .\scripts\Build-LocalMsi.ps1 -Version 2.3.0
 #>
 
 [CmdletBinding()]
@@ -42,7 +41,7 @@ function Write-Step([string]$msg) { Write-Host "`n==> $msg" -ForegroundColor Cya
 function Write-Ok([string]$msg)   { Write-Host "    $msg"   -ForegroundColor Green }
 
 # ---------------------------------------------------------------------------
-# Step 1: Resolve version — read from AppConstants.cs if not provided
+# Step 1: Resolve version — read from qbPortWeaver.csproj if not provided
 # ---------------------------------------------------------------------------
 Write-Step 'Resolving version...'
 
@@ -50,8 +49,7 @@ if (-not $Version) {
     $csprojPath = Join-Path $repoRoot 'qbPortWeaver.csproj'
     $match = Select-String -Path $csprojPath -Pattern '<Version>([^<]+)</Version>'
     if (-not $match) {
-        Write-Error "Could not find <Version> in qbPortWeaver.csproj. Pass -Version explicitly."
-        exit 1
+        throw "Could not find <Version> in qbPortWeaver.csproj. Pass -Version explicitly."
     }
     $Version = $match.Matches[0].Groups[1].Value
 }
@@ -60,8 +58,8 @@ Write-Ok "Version : $Version"
 
 # ---------------------------------------------------------------------------
 # Step 2: Publish as self-contained single-file win-x64
-#         This matches the CI build-release.yml publish step exactly.
-#         Output lands in: bin\Release\net10.0-windows\win-x64\publish\
+#         This matches the CI build-release-publish.yml publish step exactly.
+#         Output lands in: bin\Release\<tfm>\win-x64\publish\
 # ---------------------------------------------------------------------------
 Write-Step 'Publishing self-contained single-file executable...'
 
@@ -76,15 +74,15 @@ try {
         -p:FileVersion="$Version.0" `
         -p:AssemblyVersion="$Version.0"
 
-    if ($LASTEXITCODE -ne 0) { Write-Error 'dotnet publish failed.'; exit 1 }
+    if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 } finally {
     Pop-Location
 }
 
-$publishedExe = Join-Path $repoRoot "bin\Release\net10.0-windows\win-x64\publish\qbPortWeaver.exe"
+$tfm          = ([xml](Get-Content (Join-Path $repoRoot 'qbPortWeaver.csproj'))).Project.PropertyGroup.TargetFramework
+$publishedExe = Join-Path $repoRoot "bin\Release\$tfm\win-x64\publish\qbPortWeaver.exe"
 if (-not (Test-Path $publishedExe)) {
-    Write-Error "Expected publish output not found: $publishedExe"
-    exit 1
+    throw "Expected publish output not found: $publishedExe"
 }
 
 Write-Ok "Published : $publishedExe"
@@ -95,16 +93,13 @@ Write-Ok "Published : $publishedExe"
 # ---------------------------------------------------------------------------
 Write-Step 'Building MSI installer with WiX Toolset v4...'
 
-# Ensure WiX is installed
-if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
-    Write-Host '    Installing WiX Toolset v4...' -ForegroundColor Yellow
-    dotnet tool install --global wix --version "4.0.6"
-    if ($LASTEXITCODE -ne 0) { Write-Error 'Failed to install WiX Toolset.'; exit 1 }
-}
+# Ensure WiX is installed (update is idempotent — installs if missing, updates if present)
+dotnet tool update --global wix --version "4.0.6"
+if ($LASTEXITCODE -ne 0) { throw 'Failed to install/update WiX Toolset.' }
 
 # Install required extensions pinned to v4 (safe to run if already present)
 wix extension add WixToolset.UI.wixext/4.0.6 WixToolset.Util.wixext/4.0.6 --global
-if ($LASTEXITCODE -ne 0) { Write-Error 'Failed to install WiX extensions.'; exit 1 }
+if ($LASTEXITCODE -ne 0) { throw 'Failed to install WiX extensions.' }
 
 $wxsFile      = Join-Path $repoRoot 'installer\qbPortWeaver.wxs'
 $installerDir = Join-Path $repoRoot 'installer'
@@ -116,13 +111,13 @@ wix build $wxsFile `
     -ext WixToolset.Util.wixext `
     -b $installerDir `
     -d ProductVersion=$Version `
+    -d TFM=$tfm `
     -out $setupMsi
 
-if ($LASTEXITCODE -ne 0) { Write-Error 'WiX build failed.'; exit 1 }
+if ($LASTEXITCODE -ne 0) { throw 'WiX build failed.' }
 
 if (-not (Test-Path $setupMsi)) {
-    Write-Error "Expected installer not found: $setupMsi"
-    exit 1
+    throw "Expected installer not found: $setupMsi"
 }
 
 Write-Ok "Installer : $setupMsi"
