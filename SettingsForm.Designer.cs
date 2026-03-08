@@ -1,6 +1,6 @@
 namespace qbPortWeaver
 {
-    partial class frmSettings
+    partial class SettingsForm
     {
         private System.ComponentModel.IContainer components = null;
 
@@ -20,6 +20,9 @@ namespace qbPortWeaver
             grpGeneral               = new GroupBox();
             lblVpnProvider           = new Label();
             cboVpnProvider           = new ComboBox();
+            lblNatPmpAdapter         = new Label();
+            cboNatPmpAdapter         = new ComboBox();
+            btnRefreshAdapters       = new Button();
             lblUpdateInterval        = new Label();
             nudUpdateInterval        = new NumericUpDown();
             lblSeconds               = new Label();
@@ -63,11 +66,14 @@ namespace qbPortWeaver
             // ── grpGeneral ────────────────────────────────────────────────
             grpGeneral.Controls.Add(lblVpnProvider);
             grpGeneral.Controls.Add(cboVpnProvider);
+            grpGeneral.Controls.Add(lblNatPmpAdapter);
+            grpGeneral.Controls.Add(cboNatPmpAdapter);
+            grpGeneral.Controls.Add(btnRefreshAdapters);
             grpGeneral.Controls.Add(lblUpdateInterval);
             grpGeneral.Controls.Add(nudUpdateInterval);
             grpGeneral.Controls.Add(lblSeconds);
             grpGeneral.Location = new Point(8, 8);
-            grpGeneral.Size     = new Size(480, 84);
+            grpGeneral.Size     = new Size(480, 113);
             grpGeneral.TabStop  = false;
             grpGeneral.Text     = "General";
 
@@ -77,10 +83,27 @@ namespace qbPortWeaver
             lblVpnProvider.TextAlign = ContentAlignment.MiddleLeft;
 
             cboVpnProvider.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboVpnProvider.Items.AddRange(new object[] { "ProtonVPN", "PIA" });
             cboVpnProvider.Location  = new Point(148, 24);
             cboVpnProvider.Size      = new Size(200, 23);
             cboVpnProvider.TabIndex  = 0;
+            cboVpnProvider.SelectedIndexChanged += cboVpnProvider_SelectedIndexChanged;
+
+            lblNatPmpAdapter.Location  = new Point(12, 85);
+            lblNatPmpAdapter.Size      = new Size(130, 23);
+            lblNatPmpAdapter.Text      = "NAT-PMP Adapter:";
+            lblNatPmpAdapter.TextAlign = ContentAlignment.MiddleLeft;
+
+            cboNatPmpAdapter.DropDownStyle = ComboBoxStyle.DropDownList;
+            cboNatPmpAdapter.Location  = new Point(148, 82);
+            cboNatPmpAdapter.Size      = new Size(290, 23);
+            cboNatPmpAdapter.TabIndex  = 17;
+
+            btnRefreshAdapters.Location  = new Point(442, 82);
+            btnRefreshAdapters.Size      = new Size(26, 23);
+            btnRefreshAdapters.Text      = "\u21bb";
+            btnRefreshAdapters.TabIndex  = 18;
+            btnRefreshAdapters.Enabled   = false;
+            btnRefreshAdapters.Click    += btnRefreshAdapters_Click;
 
             lblUpdateInterval.Location  = new Point(12, 56);
             lblUpdateInterval.Size      = new Size(130, 23);
@@ -117,7 +140,7 @@ namespace qbPortWeaver
             grpQBittorrent.Controls.Add(nudDefaultPort);
             grpQBittorrent.Controls.Add(chkWarnOnInterfaceMismatch);
             grpQBittorrent.Controls.Add(chkRestartOnDisconnect);
-            grpQBittorrent.Location = new Point(8, 104);
+            grpQBittorrent.Location = new Point(8, 133);
             grpQBittorrent.Size     = new Size(480, 320);
             grpQBittorrent.TabStop  = false;
             grpQBittorrent.Text     = "qBittorrent";
@@ -220,7 +243,7 @@ namespace qbPortWeaver
             grpExtra.Controls.Add(lblPostUpdateCmd);
             grpExtra.Controls.Add(txtPostUpdateCmd);
             grpExtra.Controls.Add(chkDebugMode);
-            grpExtra.Location = new Point(8, 436);
+            grpExtra.Location = new Point(8, 465);
             grpExtra.Size     = new Size(480, 84);
             grpExtra.TabStop  = false;
             grpExtra.Text     = "Extra";
@@ -242,24 +265,24 @@ namespace qbPortWeaver
             chkDebugMode.TabIndex = 14;
 
             // ── Buttons ───────────────────────────────────────────────────
-            btnOK.Location     = new Point(308, 532);
+            btnOK.Location     = new Point(308, 561);
             btnOK.Size         = new Size(82, 28);
             btnOK.Text         = "OK";
             btnOK.TabIndex     = 15;
             btnOK.Click       += btnOK_Click;
 
-            btnCancel.Location     = new Point(400, 532);
+            btnCancel.Location     = new Point(400, 561);
             btnCancel.Size         = new Size(82, 28);
             btnCancel.Text         = "Cancel";
             btnCancel.TabIndex     = 16;
             btnCancel.DialogResult = DialogResult.Cancel;
 
-            // ── frmSettings ───────────────────────────────────────────────
+            // ── SettingsForm ───────────────────────────────────────────────
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode       = AutoScaleMode.Font;
             AcceptButton        = btnOK;
             CancelButton        = btnCancel;
-            ClientSize          = new Size(498, 572);
+            ClientSize          = new Size(498, 601);
             Controls.Add(grpGeneral);
             Controls.Add(grpQBittorrent);
             Controls.Add(grpExtra);
@@ -270,7 +293,7 @@ namespace qbPortWeaver
             MinimizeBox     = false;
             ShowIcon        = false;
             StartPosition   = FormStartPosition.CenterScreen;
-            Text            = $"{AppConstants.APP_NAME} | Settings";
+            Text            = $"{AppConstants.AppName} | Settings";
 
             grpGeneral.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)nudUpdateInterval).EndInit();
@@ -287,6 +310,9 @@ namespace qbPortWeaver
         private GroupBox    grpGeneral;
         private Label       lblVpnProvider;
         private ComboBox    cboVpnProvider;
+        private Label       lblNatPmpAdapter;
+        private ComboBox    cboNatPmpAdapter;
+        private Button      btnRefreshAdapters;
         private Label       lblUpdateInterval;
         private NumericUpDown nudUpdateInterval;
         private Label       lblSeconds;

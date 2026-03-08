@@ -5,6 +5,7 @@ namespace qbPortWeaver
         [STAThread]
         static void Main()
         {
+            Application.SetColorMode(SystemColorMode.System);
             ApplicationConfiguration.Initialize();
 
             // Enforce single instance using a named mutex.
@@ -20,13 +21,13 @@ namespace qbPortWeaver
             if (!isNewInstance)
             {
                 MessageBox.Show(
-                    $"{AppConstants.APP_NAME} is already running.",
-                    AppConstants.APP_NAME,
+                    $"{AppConstants.AppName} is already running.",
+                    AppConstants.AppName,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return;
             }
-            Application.Run(new frmMain());
+            Application.Run(new MainForm());
         }
     }
 }

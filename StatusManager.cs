@@ -10,7 +10,7 @@ namespace qbPortWeaver
         };
 
         // Write status dictionary to JSON file (atomic write via temp file)
-        public static void Write(Dictionary<string, object?> status)
+        public static void Write(IReadOnlyDictionary<string, object?> status)
         {
             string filePath = AppConstants.GetStatusFilePath();
             string tempPath = filePath + ".tmp";
@@ -23,7 +23,7 @@ namespace qbPortWeaver
             }
             catch (Exception ex)
             {
-                LogManager.Instance.LogMessage($"Failed to write status file: {ex.Message}", "WARN");
+                LogManager.Instance.LogMessage($"Failed to write status file: {ex.Message}", LogLevel.Warn);
                 try { File.Delete(tempPath); }
                 catch (Exception) { /* Best-effort cleanup; ignore if temp file cannot be deleted. */ }
             }

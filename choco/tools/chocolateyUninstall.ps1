@@ -1,11 +1,11 @@
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $packageArgs = @{
   packageName    = $env:ChocolateyPackageName
   softwareName   = 'qbPortWeaver*'
   fileType       = 'msi'
-  # MSI silent uninstall flags: /qn = no UI, /norestart = suppress reboot prompt
-  silentArgs     = '/qn /norestart'
+  silentArgs     = ''  # overridden below with ProductCode + /qn /norestart
   validExitCodes = @(0, 3010, 1641)
 }
 
@@ -13,20 +13,22 @@ $packageArgs = @{
 
 if ($key.Count -eq 1) {
   $key | ForEach-Object {
-    # For MSI packages the registry key name IS the ProductCode GUID
-    $packageArgs['file'] = $_.PSChildName
+    # PSChildName is the ProductCode GUID. It must go in silentArgs (unquoted),
+    # not in 'file' — Chocolatey quotes the 'file' parameter, which msiexec rejects.
+    $packageArgs['silentArgs'] = "$($_.PSChildName) /qn /norestart"
+    $packageArgs['file']       = ''
     Uninstall-ChocolateyPackage @packageArgs
   }
 } elseif ($key.Count -eq 0) {
   Write-Warning "$($packageArgs['packageName']) has already been uninstalled by other means."
 } else {
-  Write-Warning "$($key.Count) matching uninstall entries found — skipping to avoid accidental removal."
+  Write-Warning "$($key.Count) matching uninstall entries found - skipping to avoid accidental removal."
   Write-Warning "Matches: $(($key | Select-Object -ExpandProperty DisplayName) -join ', ')"
 }
 
-# Optionally remove user data (disabled by default — uncomment if desired):
-# $appDataPath = Join-Path $env:LOCALAPPDATA 'qbPortWeaver'
-# if (Test-Path $appDataPath) {
-#   Remove-Item -Recurse -Force $appDataPath
-#   Write-Host "Removed user data at $appDataPath"
+# Optionally remove user settings from the registry (disabled by default - uncomment if desired):
+# $regPath = 'HKCU:\Software\qbPortWeaver'
+# if (Test-Path $regPath) {
+#   Remove-Item -Recurse -Force $regPath
+#   Write-Host "Removed user settings at $regPath"
 # }

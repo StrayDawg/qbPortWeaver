@@ -1,29 +1,31 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace qbPortWeaver
 {
-    public partial class frmMain : Form
+    public partial class MainForm : Form
     {
         // Tray icon, menu and auto-start menu item
         private NotifyIcon _trayIcon = null!;
         private ContextMenuStrip _trayMenu = null!;
         private ToolStripMenuItem _autoStartMenuItem = null!;
 
-        // Status tray icons (generated at startup; disposed in frmMain.Designer.cs)
+        // Status tray icons (generated at startup; disposed in MainForm.Designer.cs)
         private Icon? _iconBase;
-        private Icon? _iconOK;
+        private Icon? _iconOk;
         private Icon? _iconWarning;
         private Icon? _iconError;
 
         // Services
         private readonly PortSyncService _portSyncService;
 
+        // Modeless log viewer (null when closed)
+        private LogViewerForm? _logViewerForm;
+
         // Last sync status (written from background thread, read on UI thread)
         private volatile TrayStatus? _lastSyncStatus;
 
-        // Cancellation token to interrupt waiting
-        private CancellationTokenSource _delayCancel = new CancellationTokenSource();
+        // Cancellation token for the inter-cycle delay — cancelled by manual sync requests to skip the wait
+        private CancellationTokenSource _delayCts = new CancellationTokenSource();
 
         // Semaphore to prevent concurrent updates
         private readonly SemaphoreSlim _updateSemaphore = new SemaphoreSlim(1, 1);
@@ -40,12 +42,11 @@ namespace qbPortWeaver
         // Last version for which the user was already shown an update prompt
         private string? _lastNotifiedVersion;
 
-        public frmMain()
+        public MainForm()
         {
             InitializeComponent();
 
-            // Discard intentional — LogManager constructor sets LogManager.Instance as a singleton
-            _ = new LogManager(AppConstants.GetLogFilePath());
+            LogManager.Initialize(AppConstants.GetLogFilePath());
 
             // Ensure all registry keys exist, writing defaults for any missing ones
             RegistrySettingsManager.EnsureDefaults();
@@ -59,25 +60,35 @@ namespace qbPortWeaver
             UpdateTrayTooltip();
         }
 
-        private async void frmMain_Load(object sender, EventArgs e)
+        private async void MainForm_Load(object sender, EventArgs e)
         {
-            // Start minimized and hide from taskbar
-            this.WindowState = FormWindowState.Minimized;
-            this.ShowInTaskbar = false;
+            try
+            {
+                // Start minimized and hide from taskbar
+                this.WindowState = FormWindowState.Minimized;
+                this.ShowInTaskbar = false;
 
-            // Perform initial log rotation check
-            LogManager.Instance.CheckAndRotateLogFile();
+                // Log once at startup so the version is visible in the log file for diagnostics
+                LogManager.Instance.LogMessage($"{AppConstants.AppName} {AppConstants.AppVersion} starting", LogLevel.Info);
 
-            // Check for updates on GitHub (startup check)
-            await PerformUpdateCheckAsync();
+                // Perform initial log rotation check
+                LogManager.Instance.CheckAndRotateLogFile();
 
-            // Schedule periodic update checks every 12 hours
-            _updateCheckTimer = new System.Windows.Forms.Timer { Interval = AppConstants.AUTO_UPDATE_CHECK_INTERVAL_MS };
-            _updateCheckTimer.Tick += async (s, e) => await PerformUpdateCheckAsync();
-            _updateCheckTimer.Start();
+                // Check for updates on GitHub (startup check)
+                await PerformUpdateCheckAsync();
 
-            // Start main loop (intentional fire-and-forget)
-            _ = Task.Run(RunMainLoopAsync);
+                // Schedule periodic update checks every 12 hours
+                _updateCheckTimer = new System.Windows.Forms.Timer { Interval = AppConstants.AutoUpdateCheckIntervalMs };
+                _updateCheckTimer.Tick += async (s, e) => await PerformUpdateCheckAsync();
+                _updateCheckTimer.Start();
+
+                // Start main loop (intentional fire-and-forget)
+                _ = Task.Run(RunMainLoopAsync);
+            }
+            catch (Exception ex)
+            {
+                HandleMainLoopException(ex);
+            }
         }
 
         // Handle form closing (user exit, Windows shutdown/restart/logoff)
@@ -89,7 +100,10 @@ namespace qbPortWeaver
             // Hide tray icon immediately to avoid ghost icon
             _trayIcon.Visible = false;
 
-            // Resources are disposed in Dispose(bool) via frmMain.Designer.cs
+            // Close modeless log viewer if open
+            _logViewerForm?.Close();
+
+            // Resources are disposed in Dispose(bool) via MainForm.Designer.cs
             base.OnFormClosing(e);
         }
 
@@ -97,13 +111,10 @@ namespace qbPortWeaver
         private void InitializeStatusIcons()
         {
             _iconBase    = Properties.Resources.qbPortWeaver;
-            _iconOK      = CreateStatusIcon(_iconBase, Color.LimeGreen);
+            _iconOk      = CreateStatusIcon(_iconBase, Color.LimeGreen);
             _iconWarning = CreateStatusIcon(_iconBase, Color.Orange);
             _iconError   = CreateStatusIcon(_iconBase, Color.Red);
         }
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool DestroyIcon(IntPtr hIcon);
 
         // Draws a small filled circle onto a 16x16 copy of the base icon and returns it as an Icon
         private static Icon CreateStatusIcon(Icon baseIcon, Color dotColor)
@@ -130,7 +141,7 @@ namespace qbPortWeaver
             }
             finally
             {
-                DestroyIcon(hIcon);
+                NativeMethods.DestroyIcon(hIcon);
             }
         }
 
@@ -139,20 +150,20 @@ namespace qbPortWeaver
         {
             _trayMenu = new ContextMenuStrip();
             _trayMenu.Items.Add("Synchronize Port Now", null, SynchronizePortNow_Click);
-            _trayMenu.Items.Add("Show Logs", null, (s, e) => AppConstants.OpenFileInNotepad(AppConstants.GetLogFilePath()));
+            _trayMenu.Items.Add("Show Logs", null, (s, e) => ShowLogViewer());
             _trayMenu.Items.Add("Clear Logs", null, (s, e) =>
             {
                 LogManager.Instance.ClearLogs();
-                _trayIcon.ShowBalloonTip(AppConstants.BALLOON_TIP_DURATION_MS, AppConstants.APP_NAME, "Logs cleared", ToolTipIcon.Info);
+                _trayIcon.ShowBalloonTip(AppConstants.BalloonTipDurationMs, AppConstants.AppName, "Logs cleared", ToolTipIcon.Info);
             });
             _trayMenu.Items.Add("Settings", null, (s, e) =>
             {
-                using var frm = new frmSettings();
+                using var frm = new SettingsForm();
                 frm.ShowDialog(this);
             });
             _trayMenu.Items.Add("About", null, (s, e) =>
             {
-                using var frm = new frmAbout();
+                using var frm = new AboutForm();
                 frm.ShowDialog(this);
             });
 
@@ -169,159 +180,25 @@ namespace qbPortWeaver
             _trayIcon = new NotifyIcon
             {
                 Icon = _iconBase,
-                Text = $"{AppConstants.APP_NAME} {AppConstants.APP_VERSION}",
+                Text = $"{AppConstants.AppName} {AppConstants.AppVersion}",
                 Visible = true,
                 ContextMenuStrip = _trayMenu
             };
-        }
-
-        // Checks GitHub for a newer release and prompts the user to open the download page if one is found
-        private async Task PerformUpdateCheckAsync()
-        {
-            try
+            _trayIcon.MouseDoubleClick += (s, e) =>
             {
-                LogManager.Instance.LogMessage("Checking for application updates", "INFO");
-                var update = await UpdateChecker.CheckForUpdateAsync();
-                if (update.HasValue)
-                {
-                    // Remove leading 'v' or 'V' from version if present
-                    var versionText = update.Value.Version.TrimStart('v', 'V');
-
-                    if (versionText == _lastNotifiedVersion)
-                    {
-                        LogManager.Instance.LogMessage($"New version {versionText} available (already notified)", "INFO");
-                        return;
-                    }
-
-                    _lastNotifiedVersion = versionText;
-                    LogManager.Instance.LogMessage($"New application version available: {versionText}", "INFO");
-                    var result = MessageBox.Show(
-                        $"A new version of {AppConstants.APP_NAME} is available: {versionText}\n\nWould you like to open the download page?",
-                        $"{AppConstants.APP_NAME} - Update Available",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information);
-
-                    if (result == DialogResult.Yes)
-                        Process.Start(new ProcessStartInfo(update.Value.Url) { UseShellExecute = true })?.Dispose();
-                }
-                else
-                {
-                    LogManager.Instance.LogMessage("Application is up to date", "INFO");
-                }
-            }
-            catch (Exception ex)
-            {
-                LogManager.Instance.LogDebug($"frmMain.PerformUpdateCheckAsync: {ex.Message}");
-            }
-        }
-
-        // Runs the port-sync loop until shutdown is requested
-        private async Task RunMainLoopAsync()
-        {
-            try
-            {
-                while (!_shutdownCts.IsCancellationRequested)
-                {
-                    await _updateSemaphore.WaitAsync(_shutdownCts.Token);
-                    int updateInterval;
-                    try
-                    {
-                        updateInterval = await _portSyncService.RunAsync();
-                    }
-                    finally
-                    {
-                        _updateSemaphore.Release();
-                    }
-
-                    // After a manual sync, wait only 10 seconds before next check
-                    if (_manualSyncTriggered)
-                    {
-                        _manualSyncTriggered = false;
-                        updateInterval = AppConstants.MANUAL_SYNC_WAIT_SECONDS;
-                        LogManager.Instance.LogMessage("Manual sync complete", "INFO");
-                    }
-
-                    if (await ShutdownRequestedDuringDelayAsync(updateInterval))
-                        return;
-                }
-
-                LogManager.Instance.LogMessage("Main loop exited gracefully", "INFO");
-            }
-            catch (OperationCanceledException)
-            {
-                // Shutdown was requested while waiting on semaphore or during work
-                LogManager.Instance.LogMessage("Main loop exited due to shutdown", "INFO");
-            }
-            catch (Exception ex)
-            {
-                HandleMainLoopException(ex);
-            }
-        }
-
-        // Waits for the next cycle interval, handling manual-update interrupts.
-        // Returns true if shutdown was requested (caller should stop looping), false otherwise.
-        private async Task<bool> ShutdownRequestedDuringDelayAsync(int updateInterval)
-        {
-            try
-            {
-                LogManager.Instance.LogMessage($"Waiting for {updateInterval} seconds", "INFO");
-                // Link both tokens: _delayCancel (manual sync) and _shutdownCts (app exit)
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_delayCancel.Token, _shutdownCts.Token);
-                await Task.Delay(updateInterval * AppConstants.MILLISECONDS_PER_SECOND, linkedCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                if (_shutdownCts.IsCancellationRequested)
-                {
-                    LogManager.Instance.LogMessage("Shutdown requested, exiting main loop", "INFO");
-                    return true;
-                }
-                // Manual sync interrupts delay — loop will restart immediately
-                LogManager.Instance.LogMessage("Delay interrupted by manual sync", "INFO");
-            }
-
-            // Reset token for next loop iteration (properly dispose old one)
-            var oldToken = _delayCancel;
-            _delayCancel = new CancellationTokenSource();
-            oldToken.Dispose();
-            return false;
-        }
-
-        // Handles an unexpected exception from the main loop, showing an error dialog unless shutting down
-        private void HandleMainLoopException(Exception ex)
-        {
-            if (_shutdownCts.IsCancellationRequested)
-            {
-                LogManager.Instance.LogMessage($"Main loop exited during shutdown: {ex.Message}", "INFO");
-                return;
-            }
-
-            LogManager.Instance.LogMessage($"Main loop crashed: {ex.Message}", "ERROR");
-
-            string message = $"Critical error in main loop: {ex.Message}\n\nThe application will now exit.";
-            try
-            {
-                InvokeOnUiThread(() =>
-                {
-                    MessageBox.Show(message, AppConstants.APP_NAME, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    Application.Exit();
-                });
-            }
-            catch (Exception)
-            {
-                // Form is already disposed, just exit
-                Application.Exit();
-            }
+                if (e.Button == MouseButtons.Left)
+                    ShowLogViewer();
+            };
         }
 
         // Triggers an immediate sync cycle by interrupting the current wait interval
         private void SynchronizePortNow_Click(object? sender, EventArgs e)
         {
             _manualSyncTriggered = true;
-            LogManager.Instance.LogMessage("Manual sync requested", "INFO");
+            LogManager.Instance.LogMessage("Manual sync requested", LogLevel.Info);
 
             // Interrupt the wait inside the main loop immediately
-            try { _delayCancel.Cancel(); }
+            try { _delayCts.Cancel(); }
             catch (ObjectDisposedException)
             {
                 // Expected: if the delay completed naturally, the token is already disposed before Cancel() is called.
@@ -330,7 +207,6 @@ namespace qbPortWeaver
 
         private void Exit_Click(object? sender, EventArgs e)
         {
-            // Close the form (triggers OnFormClosing -> Dispose)
             this.Close();
         }
 
@@ -346,7 +222,143 @@ namespace qbPortWeaver
         private void OnInterfaceMismatchDetected(string message)
         {
             if (_shutdownCts.IsCancellationRequested) return;
-            InvokeOnUiThread(() => _trayIcon.ShowBalloonTip(AppConstants.BALLOON_TIP_DURATION_MS, AppConstants.APP_NAME, message, ToolTipIcon.Warning));
+            InvokeOnUiThread(() => _trayIcon.ShowBalloonTip(AppConstants.BalloonTipDurationMs, AppConstants.AppName, message, ToolTipIcon.Warning));
+        }
+
+        // Runs the port-sync loop until shutdown is requested
+        private async Task RunMainLoopAsync()
+        {
+            try
+            {
+                while (!_shutdownCts.IsCancellationRequested)
+                {
+                    await _updateSemaphore.WaitAsync(_shutdownCts.Token);
+                    int updateInterval;
+                    try
+                    {
+                        updateInterval = await _portSyncService.RunAsync(_shutdownCts.Token);
+                    }
+                    finally
+                    {
+                        _updateSemaphore.Release();
+                    }
+
+                    // After a manual sync, wait only 10 seconds before next check
+                    if (_manualSyncTriggered)
+                    {
+                        _manualSyncTriggered = false;
+                        updateInterval = AppConstants.ManualSyncWaitSeconds;
+                        LogManager.Instance.LogMessage("Manual sync complete", LogLevel.Info);
+                    }
+
+                    if (await ShutdownRequestedDuringDelayAsync(updateInterval))
+                        return;
+                }
+
+                LogManager.Instance.LogMessage("Main loop exited gracefully", LogLevel.Info);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutdown was requested while waiting on semaphore or during work
+                LogManager.Instance.LogMessage("Main loop exited due to shutdown", LogLevel.Info);
+            }
+            catch (Exception ex)
+            {
+                HandleMainLoopException(ex);
+            }
+        }
+
+        // Waits for the next cycle interval, handling manual-update interrupts.
+        // Returns true if shutdown was requested (caller should stop looping), false otherwise.
+        private async Task<bool> ShutdownRequestedDuringDelayAsync(int updateInterval)
+        {
+            try
+            {
+                LogManager.Instance.LogDebug($"MainForm.ShutdownRequestedDuringDelayAsync: waiting {updateInterval} seconds before next cycle");
+                // Link both tokens: _delayCts (manual sync) and _shutdownCts (app exit)
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_delayCts.Token, _shutdownCts.Token);
+                await Task.Delay(updateInterval * AppConstants.MillisecondsPerSecond, linkedCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                if (_shutdownCts.IsCancellationRequested)
+                {
+                    LogManager.Instance.LogMessage("Shutdown requested, exiting main loop", LogLevel.Info);
+                    return true;
+                }
+                // Manual sync interrupts delay — loop will restart immediately
+                LogManager.Instance.LogMessage("Delay interrupted by manual sync", LogLevel.Info);
+            }
+
+            // Reset token for next loop iteration (properly dispose old one)
+            var oldToken = _delayCts;
+            _delayCts = new CancellationTokenSource();
+            oldToken.Dispose();
+            return false;
+        }
+
+        // Handles an unexpected exception from the main loop, showing an error dialog unless shutting down
+        private void HandleMainLoopException(Exception ex)
+        {
+            if (_shutdownCts.IsCancellationRequested)
+            {
+                LogManager.Instance.LogMessage($"Main loop exited during shutdown: {ex.Message}", LogLevel.Info);
+                return;
+            }
+
+            LogManager.Instance.LogMessage($"Main loop crashed: {ex.Message}", LogLevel.Error);
+
+            string message = $"Critical error in main loop: {ex.Message}\n\nThe application will now exit.";
+            try
+            {
+                InvokeOnUiThread(() =>
+                {
+                    MessageBox.Show(message, AppConstants.AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Application.Exit();
+                });
+            }
+            catch (Exception)
+            {
+                // Form is already disposed, just exit
+                Application.Exit();
+            }
+        }
+
+        // Checks GitHub for a newer release and prompts the user to open the download page if one is found
+        private async Task PerformUpdateCheckAsync()
+        {
+            try
+            {
+                LogManager.Instance.LogMessage("Checking for application updates", LogLevel.Info);
+                var update = await UpdateChecker.GetAvailableUpdateAsync();
+                if (update.HasValue)
+                {
+                    if (update.Value.Version == _lastNotifiedVersion)
+                    {
+                        LogManager.Instance.LogMessage($"New version {update.Value.Version} available (already notified)", LogLevel.Info);
+                        return;
+                    }
+
+                    _lastNotifiedVersion = update.Value.Version;
+                    LogManager.Instance.LogMessage($"New application version available: {update.Value.Version}", LogLevel.Info);
+                    var result = MessageBox.Show(
+                        $"A new version of {AppConstants.AppName} is available: {update.Value.Version}\n\nWould you like to open the download page?",
+                        $"{AppConstants.AppName} - Update Available",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information);
+
+                    if (result == DialogResult.Yes)
+                        AppConstants.OpenUrl(update.Value.Url);
+                }
+                else
+                {
+                    LogManager.Instance.LogMessage("Application is up to date", LogLevel.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.Instance.LogDebug($"MainForm.PerformUpdateCheckAsync: {ex.Message}");
+            }
         }
 
         // Swaps the tray icon to reflect the current sync state
@@ -354,7 +366,7 @@ namespace qbPortWeaver
         {
             _trayIcon.Icon = state switch
             {
-                SyncState.OK              => _iconOK      ?? _iconBase!,
+                SyncState.OK              => _iconOk      ?? _iconBase!,
                 SyncState.VpnDisconnected => _iconWarning ?? _iconBase!,
                 SyncState.Error           => _iconError   ?? _iconBase!,
                 _                         =>                 _iconBase!
@@ -373,11 +385,11 @@ namespace qbPortWeaver
                 _                                                      => "Starting\u2026"
             };
 
-            string text = $"{AppConstants.APP_NAME} {AppConstants.APP_VERSION}\n{statusLine}";
+            string text = $"{AppConstants.AppName} {AppConstants.AppVersion}\n{statusLine}";
 
             // Tooltip is limited to 63 characters
-            if (text.Length > AppConstants.MAX_TOOLTIP_LENGTH)
-                text = text[..AppConstants.MAX_TOOLTIP_LENGTH];
+            if (text.Length > AppConstants.MaxTooltipLength)
+                text = text[..AppConstants.MaxTooltipLength];
 
             _trayIcon.Text = text;
         }
@@ -389,6 +401,30 @@ namespace qbPortWeaver
                 this.Invoke(action);
             else
                 action();
+        }
+
+        // Opens the log viewer window; restores and activates it if already open
+        private void ShowLogViewer()
+        {
+            if (_logViewerForm is { IsDisposed: false })
+            {
+                if (_logViewerForm.WindowState == FormWindowState.Minimized)
+                    _logViewerForm.WindowState = FormWindowState.Normal;
+                _logViewerForm.BringToFront();
+                _logViewerForm.Activate();
+                return;
+            }
+
+            _logViewerForm = new LogViewerForm(LogManager.Instance.LogFilePath);
+            _logViewerForm.FormClosed += (_, _) => _logViewerForm = null;
+            _logViewerForm.Show();
+        }
+
+        // P/Invoke declarations
+        private static class NativeMethods
+        {
+            [DllImport("user32.dll", SetLastError = true)]
+            public static extern bool DestroyIcon(IntPtr hIcon);
         }
     }
 }
