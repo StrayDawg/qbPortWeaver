@@ -7,17 +7,21 @@ namespace qbPortWeaver
     public static class RegistrySettingsManager
     {
         private const string BaseKeyPath = @"Software\qbPortWeaver\Settings";
+        // Explicit string literals guarantee stable boolean registry serialization independent of framework internals.
+        private const string ValueTrue   = "True";
+        private const string ValueFalse  = "False";
 
         public const string SectionGeneral     = "general";
         public const string SectionQBittorrent = "qBittorrent";
         public const string SectionExtra       = "extra";
 
-        public const string BoolTrue  = "True";
-        public const string BoolFalse = "False";
-
         public const string VpnProviderProtonVpn = "ProtonVPN";
         public const string VpnProviderPia       = "PIA";
         public const string VpnProviderNatPmp    = "NAT-PMP";
+
+        // Registry key name strings are frozen — changing them would silently break existing installations
+        // by orphaning previously saved values. Casing inconsistencies (e.g. "restartqBittorrent" vs
+        // "qBittorrentURL") are historical and must be preserved for backward compatibility.
 
         // Registry key names — general section
         public const string KeyVpnProvider          = "vpnProvider";
@@ -57,16 +61,16 @@ namespace qbPortWeaver
                     [KeyQBittorrentPassword]     = "",
                     [KeyQBittorrentExePath]      = @"C:\Program Files\qBittorrent\qbittorrent.exe",
                     [KeyQBittorrentProcessName]  = "qbittorrent",
-                    [KeyRestartQBittorrent]      = BoolTrue,
-                    [KeyForceStartQBittorrent]   = BoolFalse,
+                    [KeyRestartQBittorrent]      = ValueTrue,
+                    [KeyForceStartQBittorrent]   = ValueFalse,
                     [KeyDefaultPort]             = "0",
-                    [KeyWarnOnInterfaceMismatch] = BoolTrue,
-                    [KeyRestartOnDisconnect]     = BoolFalse
+                    [KeyWarnOnInterfaceMismatch] = ValueTrue,
+                    [KeyRestartOnDisconnect]     = ValueFalse
                 },
                 [SectionExtra] = new(StringComparer.OrdinalIgnoreCase)
                 {
                     [KeyPostUpdateCmd] = "",
-                    [KeyDebugMode]     = BoolFalse
+                    [KeyDebugMode]     = ValueFalse
                 }
             };
 
@@ -83,7 +87,7 @@ namespace qbPortWeaver
                 }
                 catch (Exception ex)
                 {
-                    LogManager.Instance.LogDebug($"RegistrySettingsManager.EnsureDefaults [{section.Key}]: {ex.Message}");
+                    LogManager.Instance.LogDebug($"RegistrySettingsManager.EnsureDefaults: [{section.Key}]: {ex.Message}");
                 }
             }
 
@@ -99,13 +103,13 @@ namespace qbPortWeaver
                 using var regKey = Registry.CurrentUser.OpenSubKey($@"{BaseKeyPath}\{section}");
                 if (regKey?.GetValue(key) is string value)
                 {
-                    LogManager.Instance.LogDebug($"RegistrySettingsManager.GetValue: [{section}] {key} = {value}");
+                    LogManager.Instance.LogDebug($"RegistrySettingsManager.GetValue: [{section}] {key} = {MaskSensitiveValue(key, value)}");
                     return value;
                 }
             }
             catch (Exception ex)
             {
-                LogManager.Instance.LogDebug($"RegistrySettingsManager.GetValue [{section}\\{key}]: {ex.Message}");
+                LogManager.Instance.LogDebug($"RegistrySettingsManager.GetValue: [{section}] {key}: {ex.Message}");
             }
 
             string fallback = GetDefault(section, key);
@@ -157,13 +161,17 @@ namespace qbPortWeaver
             {
                 using var regKey = Registry.CurrentUser.CreateSubKey($@"{BaseKeyPath}\{section}");
                 regKey.SetValue(key, value, RegistryValueKind.String);
-                LogManager.Instance.LogDebug($"RegistrySettingsManager.SetValue: [{section}] {key} = {value}");
+                LogManager.Instance.LogDebug($"RegistrySettingsManager.SetValue: [{section}] {key} = {MaskSensitiveValue(key, value)}");
             }
             catch (Exception ex)
             {
-                LogManager.Instance.LogDebug($"RegistrySettingsManager.SetValue [{section}\\{key}]: {ex.Message}");
+                LogManager.Instance.LogMessage($"Failed to save setting [{section}] {key}: {ex.Message}", LogLevel.Warn);
             }
         }
+
+        // Writes a bool value to the registry as "True" or "False"
+        public static void SetBool(string section, string key, bool value) =>
+            SetValue(section, key, value ? ValueTrue : ValueFalse);
 
         // Encrypts the password with DPAPI (CurrentUser scope) and writes it to the registry
         public static void SetPassword(string plaintext)
@@ -177,7 +185,7 @@ namespace qbPortWeaver
             }
             catch (Exception ex)
             {
-                LogManager.Instance.LogDebug($"RegistrySettingsManager.SetPassword: {ex.Message}");
+                LogManager.Instance.LogMessage($"Failed to save password: {ex.Message}", LogLevel.Warn);
             }
         }
 
@@ -214,6 +222,10 @@ namespace qbPortWeaver
             byte[] encrypted = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);
             return Convert.ToBase64String(encrypted);
         }
+
+        // Returns "***" for the password key to avoid writing plaintext credentials to the log
+        private static string MaskSensitiveValue(string key, string value) =>
+            key.Equals(KeyQBittorrentPassword, StringComparison.OrdinalIgnoreCase) ? "***" : value;
 
         // Returns the hardcoded default for a setting; returns empty string if the section or key is not found
         private static string GetDefault(string section, string key)

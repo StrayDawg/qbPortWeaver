@@ -11,6 +11,7 @@ namespace qbPortWeaver
 
         // Timing
         public const int DefaultUpdateIntervalSeconds = 180;
+        public const int MinUpdateIntervalSeconds     = 10;
         public const int ManualSyncWaitSeconds        = 10;
         public const int MillisecondsPerSecond        = 1000;
         public const int AutoUpdateCheckIntervalMs    = 12 * 60 * 60 * MillisecondsPerSecond;
@@ -29,13 +30,13 @@ namespace qbPortWeaver
         private const string LogFileName    = "qbPortWeaver.log";
         private const string StatusFileName = "qbPortWeaver.status.json";
 
-        // App data folder, created once on first access
-        private static readonly string _appDataFolder = Directory.CreateDirectory(
+        // App data folder — created on class initialization (static field initializer)
+        private static readonly string AppDataFolder = Directory.CreateDirectory(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppName)
         ).FullName;
 
-        public static string GetLogFilePath()    => Path.Combine(_appDataFolder, LogFileName);
-        public static string GetStatusFilePath() => Path.Combine(_appDataFolder, StatusFileName);
+        public static string GetLogFilePath()    => Path.Combine(AppDataFolder, LogFileName);
+        public static string GetStatusFilePath() => Path.Combine(AppDataFolder, StatusFileName);
 
         public static string GetProtonVPNLogFilePath() => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -51,7 +52,7 @@ namespace qbPortWeaver
             }
             catch (Exception ex)
             {
-                LogManager.Instance.LogDebug($"AppConstants.OpenUrl: {ex.Message}");
+                LogManager.Instance.LogMessage($"AppConstants.OpenUrl: failed to open URL: {ex.Message}", LogLevel.Warn);
             }
         }
     }

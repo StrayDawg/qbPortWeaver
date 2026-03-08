@@ -25,7 +25,7 @@
                     _trayIcon?.Dispose();
                     _trayMenu?.Dispose();
                     _iconBase?.Dispose();
-                    _iconOK?.Dispose();
+                    _iconOk?.Dispose();
                     _iconWarning?.Dispose();
                     _iconError?.Dispose();
                     _updateCheckTimer?.Dispose();
@@ -35,7 +35,8 @@
                 }
                 catch (Exception ex)
                 {
-                    LogManager.Instance?.LogDebug($"MainForm.Dispose: Error disposing resources: {ex.Message}");
+                    if (LogManager.IsInitialized)
+                        LogManager.Instance.LogDebug($"MainForm.Dispose: Error disposing resources: {ex.Message}");
                 }
             }
             base.Dispose(disposing);

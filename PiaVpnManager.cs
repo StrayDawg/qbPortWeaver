@@ -8,7 +8,7 @@ namespace qbPortWeaver
     {
         private const string PiaUninstallRegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
         private const string PiaDisplayName           = "Private Internet Access";
-        private const string PiactlFilename           = "piactl.exe";
+        private const string PiactlFileName           = "piactl.exe";
         private const int    ProcessTimeoutMs         = 5000;
 
         public string ProviderName => RegistrySettingsManager.VpnProviderPia;
@@ -39,29 +39,31 @@ namespace qbPortWeaver
             }
         }
 
-        public int? GetVpnPort()
+        public Task<int?> GetVpnPortAsync() => Task.FromResult(GetVpnPortCore());
+
+        private static int? GetVpnPortCore()
         {
             try
             {
                 string? output = RunPiactl("get portforward");
                 if (output == null)
                 {
-                    LogManager.Instance.LogDebug("PiaVpnManager.GetVpnPort: piactl returned no output");
+                    LogManager.Instance.LogDebug("PiaVpnManager.GetVpnPortCore: piactl returned no output");
                     return null;
                 }
 
                 if (int.TryParse(output, out int port) && port > 0)
                 {
-                    LogManager.Instance.LogDebug($"PiaVpnManager.GetVpnPort: Found port {port}");
+                    LogManager.Instance.LogDebug($"PiaVpnManager.GetVpnPortCore: Found port {port}");
                     return port;
                 }
 
-                LogManager.Instance.LogDebug($"PiaVpnManager.GetVpnPort: Could not parse port from piactl output: {output}");
+                LogManager.Instance.LogDebug($"PiaVpnManager.GetVpnPortCore: Could not parse port from piactl output: {output}");
                 return null;
             }
             catch (Exception ex)
             {
-                LogManager.Instance.LogDebug($"PiaVpnManager.GetVpnPort: {ex.Message}");
+                LogManager.Instance.LogDebug($"PiaVpnManager.GetVpnPortCore: {ex.Message}");
                 return null;
             }
         }
@@ -92,9 +94,6 @@ namespace qbPortWeaver
                     return null;
                 }
 
-                // Read asynchronously so WaitForExit timeout still applies even if output is large
-                var outputTask = process.StandardOutput.ReadToEndAsync();
-
                 if (!process.WaitForExit(ProcessTimeoutMs))
                 {
                     process.Kill();
@@ -102,8 +101,9 @@ namespace qbPortWeaver
                     return null;
                 }
 
-                // Process has exited, stdout is closed — the async read is complete
-                string output = outputTask.GetAwaiter().GetResult().Trim();
+                // piactl output is always tiny (a few characters); stdout buffer overflow is not a concern,
+                // so synchronous ReadToEnd() after WaitForExit() is safe and simpler than async.
+                string output = process.StandardOutput.ReadToEnd().Trim();
 
                 LogManager.Instance.LogDebug($"PiaVpnManager.RunPiactl: '{arguments}' returned: {output}");
                 return output;
@@ -144,7 +144,7 @@ namespace qbPortWeaver
                         return null;
                     }
 
-                    string piactlPath = Path.Combine(installLocation, PiactlFilename);
+                    string piactlPath = Path.Combine(installLocation, PiactlFileName);
                     if (!File.Exists(piactlPath))
                     {
                         LogManager.Instance.LogDebug($"PiaVpnManager.GetPiactlPath: piactl not found at: {piactlPath}");

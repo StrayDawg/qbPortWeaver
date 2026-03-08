@@ -8,11 +8,20 @@ namespace qbPortWeaver
 
     public sealed class PortSyncService
     {
+        // qBittorrent API value returned by /api/v2/transfer/info when the client has no active connections
+        private const string QBittorrentDisconnectedStatus = "disconnected";
+
         // Event raised when a sync cycle completes (success or failure)
         public event Action<TrayStatus>? SyncCompleted;
 
         // Event raised when qBittorrent's network interface does not match the configured VPN provider
         public event Action<string>? InterfaceMismatchDetected;
+
+        // Kept solely as a disconnection fallback: when TryCreateForAdapter cannot reach the configured
+        // adapter (e.g. VPN is between disconnect and reconnect), this is returned so IsVpnConnected()
+        // reports false and RunCoreAsync handles disconnection gracefully instead of surfacing an error.
+        // Cleared when the configured adapter name changes in settings.
+        private NatPmpManager? _lastKnownNatPmpManager;
 
         // All values read from the registry for a single sync cycle
         private sealed record AppConfig(
@@ -60,13 +69,13 @@ namespace qbPortWeaver
                 [StatusKeys.QBittorrentPort]         = null,
                 [StatusKeys.PortChanged]             = false,
                 [StatusKeys.UpdateIntervalSeconds]   = AppConstants.DefaultUpdateIntervalSeconds,
-                [StatusKeys.Status]                  = "error",
+                [StatusKeys.Status]                  = StatusKeys.StatusError,
                 [StatusKeys.Message]                 = null
             };
 
             try
             {
-                return await RunCoreAsync(status, cancellationToken);
+                return await RunCoreAsync(status, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -77,7 +86,7 @@ namespace qbPortWeaver
             {
                 StatusManager.Write(status);
 
-                bool success      = status[StatusKeys.Status]          as string == "success";
+                bool success      = status[StatusKeys.Status]          as string == StatusKeys.StatusSuccess;
                 bool vpnConnected = status[StatusKeys.VpnConnected]   is true;
                 int? port         = status[StatusKeys.QBittorrentPort] as int?;
                 string message    = status[StatusKeys.Message]         as string ?? string.Empty;
@@ -97,15 +106,14 @@ namespace qbPortWeaver
             LogManager.Instance.LogMessage("Sync cycle started", LogLevel.Info);
 
             // Set debug mode as early as possible (reads fresh from registry each loop)
-            bool.TryParse(RegistrySettingsManager.GetValue(RegistrySettingsManager.SectionExtra, RegistrySettingsManager.KeyDebugMode), out bool debugMode);
-            LogManager.Instance.DebugMode = debugMode;
+            LogManager.Instance.DebugMode = RegistrySettingsManager.GetBool(RegistrySettingsManager.SectionExtra, RegistrySettingsManager.KeyDebugMode);
 
             var cfg = ReadConfig();
             status[StatusKeys.VpnProvider]           = cfg.VpnProvider;
             status[StatusKeys.UpdateIntervalSeconds] = cfg.UpdateInterval;
 
             // Instantiate VPN manager based on configured provider
-            IVpnManager? vpnManager = await CreateVpnManager(cfg, status);
+            IVpnManager? vpnManager = await CreateVpnManager(cfg, status).ConfigureAwait(false);
             if (vpnManager is null)
                 return cfg.UpdateInterval;
 
@@ -117,7 +125,7 @@ namespace qbPortWeaver
             {
                 if (cfg.DefaultPort == 0)
                 {
-                    status[StatusKeys.Status]  = "skipped";
+                    status[StatusKeys.Status]  = StatusKeys.StatusSkipped;
                     status[StatusKeys.Message] = $"{vpnManager.ProviderName} is not connected";
                     LogManager.Instance.LogMessage($"{vpnManager.ProviderName} is not connected, default port is 0 — skipping port update", LogLevel.Info);
                     return cfg.UpdateInterval;
@@ -132,7 +140,7 @@ namespace qbPortWeaver
                 status[StatusKeys.VpnConnected] = true;
                 LogManager.Instance.LogMessage($"{vpnManager.ProviderName} is connected", LogLevel.Info);
 
-                int? vpnPort = vpnManager.GetVpnPort();
+                int? vpnPort = await vpnManager.GetVpnPortAsync().ConfigureAwait(false);
                 if (!vpnPort.HasValue)
                 {
                     SetCompleted(status, false, $"Failed to determine {vpnManager.ProviderName} port");
@@ -140,6 +148,15 @@ namespace qbPortWeaver
                 }
                 status[StatusKeys.VpnPort] = vpnPort.Value;
                 LogManager.Instance.LogMessage($"{vpnManager.ProviderName} port found: {vpnPort.Value}", LogLevel.Info);
+
+                // Warn if the NAT-PMP lease will expire before the next sync cycle renews it
+                if (vpnManager is NatPmpManager natPmp &&
+                    natPmp.LastGrantedLifetime > 0 &&
+                    cfg.UpdateInterval > natPmp.LastGrantedLifetime)
+                    LogManager.Instance.LogMessage(
+                        $"NAT-PMP sync interval ({cfg.UpdateInterval}s) exceeds lease lifetime ({natPmp.LastGrantedLifetime}s) — port mapping will expire before the next sync cycle",
+                        LogLevel.Warn);
+
                 targetPort              = vpnPort.Value;
                 vpnProviderName         = vpnManager.ProviderName;
                 warnOnInterfaceMismatch = cfg.WarnOnInterfaceMismatch;
@@ -158,7 +175,7 @@ namespace qbPortWeaver
                     WarnOnInterfaceMismatch: warnOnInterfaceMismatch,
                     RestartOnDisconnect:     cfg.RestartOnDisconnect),
                 status,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             return cfg.UpdateInterval;
         }
@@ -167,7 +184,7 @@ namespace qbPortWeaver
         private static AppConfig ReadConfig()
         {
             int updateInterval = RegistrySettingsManager.GetInt(RegistrySettingsManager.SectionGeneral, RegistrySettingsManager.KeyUpdateIntervalSeconds);
-            if (updateInterval < 10) updateInterval = AppConstants.DefaultUpdateIntervalSeconds;
+            if (updateInterval < AppConstants.MinUpdateIntervalSeconds) updateInterval = AppConstants.DefaultUpdateIntervalSeconds;
 
             bool restartQBittorrent      = RegistrySettingsManager.GetBool(RegistrySettingsManager.SectionQBittorrent, RegistrySettingsManager.KeyRestartQBittorrent);
             bool forceStartQBittorrent   = RegistrySettingsManager.GetBool(RegistrySettingsManager.SectionQBittorrent, RegistrySettingsManager.KeyForceStartQBittorrent);
@@ -195,28 +212,48 @@ namespace qbPortWeaver
 
         // Instantiates the appropriate VPN manager for the configured provider.
         // Returns null (with status already set) if the provider cannot be initialised.
-        private static async Task<IVpnManager?> CreateVpnManager(AppConfig cfg, Dictionary<string, object?> status)
+        private async Task<IVpnManager?> CreateVpnManager(AppConfig cfg, Dictionary<string, object?> status)
         {
             if (cfg.VpnProvider.Equals(RegistrySettingsManager.VpnProviderPia, StringComparison.OrdinalIgnoreCase))
                 return new PiaVpnManager();
 
             if (cfg.VpnProvider.Equals(RegistrySettingsManager.VpnProviderNatPmp, StringComparison.OrdinalIgnoreCase))
             {
-                var adapters = await NatPmpManager.DiscoverAdapters().ConfigureAwait(false);
-                if (adapters.Count == 0)
+                if (string.IsNullOrWhiteSpace(cfg.NatPmpAdapterName))
                 {
-                    SetCompleted(status, false, "No NAT-PMP capable adapters found");
+                    SetCompleted(status, false, "No NAT-PMP adapter configured — open Settings and select an adapter");
                     return null;
                 }
-                // Use the configured adapter if set; otherwise fall back to the first connected one
-                if (!string.IsNullOrWhiteSpace(cfg.NatPmpAdapterName))
+
+                // Discard the fallback if the adapter name changed in settings
+                if (_lastKnownNatPmpManager is not null &&
+                    !_lastKnownNatPmpManager.ProviderName.Equals(cfg.NatPmpAdapterName, StringComparison.OrdinalIgnoreCase))
+                    _lastKnownNatPmpManager = null;
+
+                var selected = await NatPmpManager.TryCreateForAdapter(cfg.NatPmpAdapterName).ConfigureAwait(false);
+
+                if (selected is not null)
                 {
-                    var configured = adapters.FirstOrDefault(a => a.ProviderName.Equals(cfg.NatPmpAdapterName, StringComparison.OrdinalIgnoreCase));
-                    if (configured is null)
-                        LogManager.Instance.LogMessage($"Configured NAT-PMP adapter '{cfg.NatPmpAdapterName}' not found, falling back to first available", LogLevel.Warn);
-                    return configured ?? adapters.FirstOrDefault(a => a.IsVpnConnected()) ?? adapters[0];
+                    // Transfer renewal state from the previous instance so port renewal works correctly
+                    // when TryCreateForAdapter() returns a fresh NatPmpManager instance each cycle.
+                    if (_lastKnownNatPmpManager is not null)
+                        selected.CopyRenewalStateFrom(_lastKnownNatPmpManager);
+                    _lastKnownNatPmpManager = selected;
+                    return selected;
                 }
-                return adapters.FirstOrDefault(a => a.IsVpnConnected()) ?? adapters[0];
+
+                // Adapter not found — likely down between disconnect and reconnect.
+                // Return the last known manager so IsVpnConnected() reports false and
+                // RunCoreAsync handles disconnection gracefully (apply default port or skip).
+                if (_lastKnownNatPmpManager is not null)
+                {
+                    LogManager.Instance.LogDebug("PortSyncService.CreateVpnManager: adapter not discoverable, using last known manager for disconnection handling");
+                    return _lastKnownNatPmpManager;
+                }
+
+                // No previous knowledge of this adapter — first run with VPN disconnected or misconfiguration
+                SetCompleted(status, false, $"Configured NAT-PMP adapter '{cfg.NatPmpAdapterName}' not found — adapter may not be up or gateway not responding");
+                return null;
             }
 
             if (!cfg.VpnProvider.Equals(RegistrySettingsManager.VpnProviderProtonVpn, StringComparison.OrdinalIgnoreCase))
@@ -227,12 +264,12 @@ namespace qbPortWeaver
         // Ensures qBittorrent is running, then updates its port if it differs from the target port
         private async Task EnsureRunningAndUpdatePortAsync(QBittorrentManager manager, int targetPort, SyncConfig config, Dictionary<string, object?> status, CancellationToken cancellationToken)
         {
-            if (!await EnsureQBittorrentRunningAsync(manager, config, status, cancellationToken))
+            if (!await EnsureQBittorrentRunningAsync(manager, config, status, cancellationToken).ConfigureAwait(false))
                 return;
             status[StatusKeys.QBittorrentRunning] = true;
 
             // Get current preferences (listening port and network interface) in a single request
-            var (currentPort, currentInterfaceName) = await manager.GetPreferencesAsync();
+            var (currentPort, currentInterfaceName) = await manager.GetPreferencesAsync().ConfigureAwait(false);
             if (!currentPort.HasValue)
             {
                 SetCompleted(status, false, "Failed to determine qBittorrent port");
@@ -252,7 +289,7 @@ namespace qbPortWeaver
             }
             else
             {
-                if (!await ApplyPortUpdateAsync(manager, targetPort, config, status, cancellationToken))
+                if (!await ApplyPortUpdateAsync(manager, targetPort, config, status, cancellationToken).ConfigureAwait(false))
                     return;
             }
 
@@ -260,7 +297,7 @@ namespace qbPortWeaver
             // by ApplyPortUpdateAsync (port changed + restart enabled) to avoid a redundant cycle.
             bool alreadyRestarted = config.Restart && status[StatusKeys.PortChanged] is true;
             if (config.RestartOnDisconnect && !alreadyRestarted)
-                await CheckAndRestartIfDisconnectedAsync(manager, cancellationToken);
+                await CheckAndRestartIfDisconnectedAsync(manager, cancellationToken).ConfigureAwait(false);
 
             SetCompleted(status, true, "Completed successfully");
         }
@@ -276,12 +313,12 @@ namespace qbPortWeaver
 
             if (!config.ForceStart)
             {
-                SetCompleted(status, false, "qBittorrent is not running");
+                SetCompleted(status, false, "qBittorrent is not running", LogLevel.Warn);
                 return false;
             }
 
             LogManager.Instance.LogMessage("qBittorrent is not running, attempting to force start", LogLevel.Info);
-            if (!await manager.ForceStartAsync(cancellationToken))
+            if (!await manager.ForceStartAsync(cancellationToken).ConfigureAwait(false))
             {
                 SetCompleted(status, false, "Failed to force start qBittorrent");
                 return false;
@@ -341,7 +378,7 @@ namespace qbPortWeaver
         private static async Task<bool> ApplyPortUpdateAsync(QBittorrentManager manager, int targetPort, SyncConfig config, Dictionary<string, object?> status, CancellationToken cancellationToken)
         {
             LogManager.Instance.LogMessage($"Ports do not match, updating qBittorrent port to {targetPort}", LogLevel.Info);
-            if (!await manager.SetListeningPortAsync(targetPort))
+            if (!await manager.SetListeningPortAsync(targetPort).ConfigureAwait(false))
             {
                 SetCompleted(status, false, $"Failed to set qBittorrent port to {targetPort}");
                 return false;
@@ -354,7 +391,7 @@ namespace qbPortWeaver
             if (config.Restart)
             {
                 LogManager.Instance.LogMessage("Attempting to restart qBittorrent", LogLevel.Info);
-                if (!await manager.RestartAsync(cancellationToken))
+                if (!await manager.RestartAsync(cancellationToken).ConfigureAwait(false))
                 {
                     SetCompleted(status, false, "Failed to restart qBittorrent");
                     return false;
@@ -369,7 +406,10 @@ namespace qbPortWeaver
             return true;
         }
 
-        // Launches the post-update shell command (fire-and-forget)
+        // Launches the post-update shell command (fire-and-forget).
+        // The command string is passed through directly without sanitisation — this is intentional.
+        // It is a user-configured value (stored in the registry under HKCU) so the user already
+        // controls execution in their own context; no external or untrusted input reaches this path.
         private static void RunPostUpdateCommand(string cmd)
         {
             LogManager.Instance.LogMessage($"Running post-update command: {cmd}", LogLevel.Info);
@@ -382,7 +422,7 @@ namespace qbPortWeaver
                     CreateNoWindow  = true
                 };
                 Process.Start(startInfo)?.Dispose();
-                LogManager.Instance.LogMessage("Successfully launched post-update command", LogLevel.Info);
+                LogManager.Instance.LogMessage("Post-update command launched (fire-and-forget; result not tracked)", LogLevel.Info);
             }
             catch (Exception ex)
             {
@@ -393,33 +433,35 @@ namespace qbPortWeaver
         // Polls /api/v2/transfer/info and restarts qBittorrent if connection_status is "disconnected"
         private static async Task CheckAndRestartIfDisconnectedAsync(QBittorrentManager manager, CancellationToken cancellationToken)
         {
-            string? connectionStatus = await manager.GetConnectionStatusAsync();
+            string? connectionStatus = await manager.GetConnectionStatusAsync().ConfigureAwait(false);
             if (connectionStatus == null)
                 return;
 
             LogManager.Instance.LogMessage($"qBittorrent connection status: {connectionStatus}", LogLevel.Info);
 
-            if (!connectionStatus.Equals("disconnected", StringComparison.OrdinalIgnoreCase))
+            if (!connectionStatus.Equals(QBittorrentDisconnectedStatus, StringComparison.OrdinalIgnoreCase))
                 return;
 
             LogManager.Instance.LogMessage("qBittorrent connection status is disconnected — restarting", LogLevel.Warn);
-            if (!await manager.RestartAsync(cancellationToken))
+            if (!await manager.RestartAsync(cancellationToken).ConfigureAwait(false))
                 LogManager.Instance.LogMessage("Failed to restart qBittorrent after connection disconnect", LogLevel.Error);
             else
                 LogManager.Instance.LogMessage("Successfully restarted qBittorrent after connection disconnect", LogLevel.Info);
         }
 
-        // Sets the completion status and logs the message
-        private static void SetCompleted(Dictionary<string, object?> status, bool success, string message)
+        // Sets the completion status and logs the message.
+        // Pass an explicit level to override the default (Info on success, Error on failure).
+        private static void SetCompleted(Dictionary<string, object?> status, bool success, string message, LogLevel? level = null)
         {
-            status[StatusKeys.Status]  = success ? "success" : "error";
+            status[StatusKeys.Status]  = success ? StatusKeys.StatusSuccess : StatusKeys.StatusError;
             status[StatusKeys.Message] = message;
-            LogManager.Instance.LogMessage(message, success ? LogLevel.Info : LogLevel.Error);
+            LogManager.Instance.LogMessage(message, level ?? (success ? LogLevel.Info : LogLevel.Error));
         }
 
-        // Compile-time–safe keys for the status dictionary written to the JSON status file
+        // Compile-time–safe keys and values for the status dictionary written to the JSON status file
         private static class StatusKeys
         {
+            // Keys
             public const string AppVersion              = "appVersion";
             public const string Timestamp               = "timestamp";
             public const string VpnProvider             = "vpnProvider";
@@ -432,6 +474,11 @@ namespace qbPortWeaver
             public const string UpdateIntervalSeconds   = "updateIntervalSeconds";
             public const string Status                  = "status";
             public const string Message                 = "message";
+
+            // Values for the Status key — "skipped" means VPN disconnected with no default port configured (cycle is a no-op)
+            public const string StatusSuccess = "success";
+            public const string StatusError   = "error";
+            public const string StatusSkipped = "skipped";
         }
     }
 }

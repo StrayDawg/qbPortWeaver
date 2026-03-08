@@ -11,10 +11,14 @@ namespace qbPortWeaver
         private const int  MaxLogFiles          = 3;   // Keep only 3 logfiles total (including current)
         private const int  RotationCheckInterval = 100; // Check rotation every N writes
 
-        // Static instance for global access
-        public static LogManager Instance { get; private set; } = null!;
+        // Static instance for global access — null until Initialize() is called
+        private static LogManager? _instance;
+        public static bool IsInitialized => _instance != null;
+        public static LogManager Instance =>
+            _instance ?? throw new InvalidOperationException(
+                $"{nameof(LogManager)} has not been initialized. Call {nameof(Initialize)} first.");
 
-        private readonly string _logFilePath;
+        public  string LogFilePath { get; }
         private readonly object _lock = new object();
         private int _writeCount;
 
@@ -28,15 +32,15 @@ namespace qbPortWeaver
         // Initializes the singleton; throws if called more than once
         public static LogManager Initialize(string logFilePath)
         {
-            if (Instance != null)
+            if (_instance != null)
                 throw new InvalidOperationException($"{nameof(LogManager)} has already been initialized");
-            return new LogManager(logFilePath);
+            _instance = new LogManager(logFilePath);
+            return _instance;
         }
 
         private LogManager(string logFilePath)
         {
-            _logFilePath = logFilePath;
-            Instance     = this;
+            LogFilePath = logFilePath;
         }
 
         // Writes a log entry at the given level (thread-safe)
@@ -57,7 +61,7 @@ namespace qbPortWeaver
                     string paddedType = level.ToString().ToUpperInvariant().PadRight(5);
                     string logEntry = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} | {paddedType} | {message}{Environment.NewLine}";
 
-                    using var fs = new FileStream(_logFilePath, FileMode.Append, FileAccess.Write, FileShare.Read);
+                    using var fs = new FileStream(LogFilePath, FileMode.Append, FileAccess.Write, FileShare.Read);
                     using var writer = new StreamWriter(fs, Encoding.UTF8);
                     writer.Write(logEntry);
                 }
@@ -85,13 +89,13 @@ namespace qbPortWeaver
                     // Delete rotated backup files
                     for (int i = 1; i < MaxLogFiles; i++)
                     {
-                        string backup = $"{_logFilePath}.{i}";
+                        string backup = $"{LogFilePath}.{i}";
                         if (File.Exists(backup))
                             File.Delete(backup);
                     }
 
-                    if (File.Exists(_logFilePath))
-                        File.Delete(_logFilePath);
+                    if (File.Exists(LogFilePath))
+                        File.Delete(LogFilePath);
 
                     _writeCount = 0;
                 }
@@ -119,22 +123,23 @@ namespace qbPortWeaver
         {
             try
             {
-                if (!File.Exists(_logFilePath))
+                if (!File.Exists(LogFilePath))
                     return;
 
-                var fileInfo = new FileInfo(_logFilePath);
+                var fileInfo = new FileInfo(LogFilePath);
                 if (fileInfo.Length > MaxSize)
                 {
                     // Delete oldest backup if we already have max files
-                    string oldestBackup = $"{_logFilePath}.{MaxLogFiles - 1}";
+                    string oldestBackup = $"{LogFilePath}.{MaxLogFiles - 1}";
                     if (File.Exists(oldestBackup))
                         File.Delete(oldestBackup);
 
-                    // Rotate existing backup files (.1 -> .2, current -> .1)
+                    // Shift existing backups up: .1 → .2
                     RotateBackupFiles();
 
-                    string backupPath = $"{_logFilePath}.1";
-                    File.Move(_logFilePath, backupPath, overwrite: true);
+                    // Move current log to .1
+                    string backupPath = $"{LogFilePath}.1";
+                    File.Move(LogFilePath, backupPath, overwrite: true);
                 }
             }
             catch (Exception ex)
@@ -148,8 +153,8 @@ namespace qbPortWeaver
         {
             for (int i = MaxLogFiles - 2; i >= 1; i--)
             {
-                string currentBackup = $"{_logFilePath}.{i}";
-                string nextBackup = $"{_logFilePath}.{i + 1}";
+                string currentBackup = $"{LogFilePath}.{i}";
+                string nextBackup = $"{LogFilePath}.{i + 1}";
 
                 if (File.Exists(currentBackup))
                     File.Move(currentBackup, nextBackup, overwrite: true);

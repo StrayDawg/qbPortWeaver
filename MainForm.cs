@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace qbPortWeaver
@@ -12,17 +11,20 @@ namespace qbPortWeaver
 
         // Status tray icons (generated at startup; disposed in MainForm.Designer.cs)
         private Icon? _iconBase;
-        private Icon? _iconOK;
+        private Icon? _iconOk;
         private Icon? _iconWarning;
         private Icon? _iconError;
 
         // Services
         private readonly PortSyncService _portSyncService;
 
+        // Modeless log viewer (null when closed)
+        private LogViewerForm? _logViewerForm;
+
         // Last sync status (written from background thread, read on UI thread)
         private volatile TrayStatus? _lastSyncStatus;
 
-        // Cancellation token to interrupt waiting
+        // Cancellation token for the inter-cycle delay — cancelled by manual sync requests to skip the wait
         private CancellationTokenSource _delayCts = new CancellationTokenSource();
 
         // Semaphore to prevent concurrent updates
@@ -60,26 +62,33 @@ namespace qbPortWeaver
 
         private async void MainForm_Load(object sender, EventArgs e)
         {
-            // Start minimized and hide from taskbar
-            this.WindowState = FormWindowState.Minimized;
-            this.ShowInTaskbar = false;
+            try
+            {
+                // Start minimized and hide from taskbar
+                this.WindowState = FormWindowState.Minimized;
+                this.ShowInTaskbar = false;
 
-            // Log once at startup so the version is visible in the log file for diagnostics
-            LogManager.Instance.LogMessage($"{AppConstants.AppName} {AppConstants.AppVersion} starting", LogLevel.Info);
+                // Log once at startup so the version is visible in the log file for diagnostics
+                LogManager.Instance.LogMessage($"{AppConstants.AppName} {AppConstants.AppVersion} starting", LogLevel.Info);
 
-            // Perform initial log rotation check
-            LogManager.Instance.CheckAndRotateLogFile();
+                // Perform initial log rotation check
+                LogManager.Instance.CheckAndRotateLogFile();
 
-            // Check for updates on GitHub (startup check)
-            await PerformUpdateCheckAsync();
+                // Check for updates on GitHub (startup check)
+                await PerformUpdateCheckAsync();
 
-            // Schedule periodic update checks every 12 hours
-            _updateCheckTimer = new System.Windows.Forms.Timer { Interval = AppConstants.AutoUpdateCheckIntervalMs };
-            _updateCheckTimer.Tick += async (s, e) => await PerformUpdateCheckAsync();
-            _updateCheckTimer.Start();
+                // Schedule periodic update checks every 12 hours
+                _updateCheckTimer = new System.Windows.Forms.Timer { Interval = AppConstants.AutoUpdateCheckIntervalMs };
+                _updateCheckTimer.Tick += async (s, e) => await PerformUpdateCheckAsync();
+                _updateCheckTimer.Start();
 
-            // Start main loop (intentional fire-and-forget)
-            _ = Task.Run(RunMainLoopAsync);
+                // Start main loop (intentional fire-and-forget)
+                _ = Task.Run(RunMainLoopAsync);
+            }
+            catch (Exception ex)
+            {
+                HandleMainLoopException(ex);
+            }
         }
 
         // Handle form closing (user exit, Windows shutdown/restart/logoff)
@@ -91,49 +100,18 @@ namespace qbPortWeaver
             // Hide tray icon immediately to avoid ghost icon
             _trayIcon.Visible = false;
 
+            // Close modeless log viewer if open
+            _logViewerForm?.Close();
+
             // Resources are disposed in Dispose(bool) via MainForm.Designer.cs
             base.OnFormClosing(e);
-        }
-
-        // Triggers an immediate sync cycle by interrupting the current wait interval
-        private void SynchronizePortNow_Click(object? sender, EventArgs e)
-        {
-            _manualSyncTriggered = true;
-            LogManager.Instance.LogMessage("Manual sync requested", LogLevel.Info);
-
-            // Interrupt the wait inside the main loop immediately
-            try { _delayCts.Cancel(); }
-            catch (ObjectDisposedException)
-            {
-                // Expected: if the delay completed naturally, the token is already disposed before Cancel() is called.
-            }
-        }
-
-        private void Exit_Click(object? sender, EventArgs e)
-        {
-            this.Close();
-        }
-
-        // Called by PortSyncService when a sync cycle completes
-        private void OnSyncCompleted(TrayStatus status)
-        {
-            _lastSyncStatus = status;
-            if (!_shutdownCts.IsCancellationRequested)
-                InvokeOnUiThread(() => { UpdateTrayIcon(status.State); UpdateTrayTooltip(); });
-        }
-
-        // Called by PortSyncService when qBittorrent's network interface doesn't match the configured VPN provider
-        private void OnInterfaceMismatchDetected(string message)
-        {
-            if (_shutdownCts.IsCancellationRequested) return;
-            InvokeOnUiThread(() => _trayIcon.ShowBalloonTip(AppConstants.BalloonTipDurationMs, AppConstants.AppName, message, ToolTipIcon.Warning));
         }
 
         // Pre-generates the three status icon variants (colored dot in the bottom-right corner)
         private void InitializeStatusIcons()
         {
             _iconBase    = Properties.Resources.qbPortWeaver;
-            _iconOK      = CreateStatusIcon(_iconBase, Color.LimeGreen);
+            _iconOk      = CreateStatusIcon(_iconBase, Color.LimeGreen);
             _iconWarning = CreateStatusIcon(_iconBase, Color.Orange);
             _iconError   = CreateStatusIcon(_iconBase, Color.Red);
         }
@@ -172,7 +150,7 @@ namespace qbPortWeaver
         {
             _trayMenu = new ContextMenuStrip();
             _trayMenu.Items.Add("Synchronize Port Now", null, SynchronizePortNow_Click);
-            _trayMenu.Items.Add("Show Logs", null, (s, e) => OpenFileInNotepad(AppConstants.GetLogFilePath()));
+            _trayMenu.Items.Add("Show Logs", null, (s, e) => ShowLogViewer());
             _trayMenu.Items.Add("Clear Logs", null, (s, e) =>
             {
                 LogManager.Instance.ClearLogs();
@@ -206,43 +184,45 @@ namespace qbPortWeaver
                 Visible = true,
                 ContextMenuStrip = _trayMenu
             };
+            _trayIcon.MouseDoubleClick += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                    ShowLogViewer();
+            };
         }
 
-        // Checks GitHub for a newer release and prompts the user to open the download page if one is found
-        private async Task PerformUpdateCheckAsync()
+        // Triggers an immediate sync cycle by interrupting the current wait interval
+        private void SynchronizePortNow_Click(object? sender, EventArgs e)
         {
-            try
-            {
-                LogManager.Instance.LogMessage("Checking for application updates", LogLevel.Info);
-                var update = await UpdateChecker.GetAvailableUpdateAsync();
-                if (update.HasValue)
-                {
-                    if (update.Value.Version == _lastNotifiedVersion)
-                    {
-                        LogManager.Instance.LogMessage($"New version {update.Value.Version} available (already notified)", LogLevel.Info);
-                        return;
-                    }
+            _manualSyncTriggered = true;
+            LogManager.Instance.LogMessage("Manual sync requested", LogLevel.Info);
 
-                    _lastNotifiedVersion = update.Value.Version;
-                    LogManager.Instance.LogMessage($"New application version available: {update.Value.Version}", LogLevel.Info);
-                    var result = MessageBox.Show(
-                        $"A new version of {AppConstants.AppName} is available: {update.Value.Version}\n\nWould you like to open the download page?",
-                        $"{AppConstants.AppName} - Update Available",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information);
-
-                    if (result == DialogResult.Yes)
-                        AppConstants.OpenUrl(update.Value.Url);
-                }
-                else
-                {
-                    LogManager.Instance.LogMessage("Application is up to date", LogLevel.Info);
-                }
-            }
-            catch (Exception ex)
+            // Interrupt the wait inside the main loop immediately
+            try { _delayCts.Cancel(); }
+            catch (ObjectDisposedException)
             {
-                LogManager.Instance.LogDebug($"MainForm.PerformUpdateCheckAsync: {ex.Message}");
+                // Expected: if the delay completed naturally, the token is already disposed before Cancel() is called.
             }
+        }
+
+        private void Exit_Click(object? sender, EventArgs e)
+        {
+            this.Close();
+        }
+
+        // Called by PortSyncService when a sync cycle completes
+        private void OnSyncCompleted(TrayStatus status)
+        {
+            _lastSyncStatus = status;
+            if (!_shutdownCts.IsCancellationRequested)
+                InvokeOnUiThread(() => { UpdateTrayIcon(status.State); UpdateTrayTooltip(); });
+        }
+
+        // Called by PortSyncService when qBittorrent's network interface doesn't match the configured VPN provider
+        private void OnInterfaceMismatchDetected(string message)
+        {
+            if (_shutdownCts.IsCancellationRequested) return;
+            InvokeOnUiThread(() => _trayIcon.ShowBalloonTip(AppConstants.BalloonTipDurationMs, AppConstants.AppName, message, ToolTipIcon.Warning));
         }
 
         // Runs the port-sync loop until shutdown is requested
@@ -344,12 +324,49 @@ namespace qbPortWeaver
             }
         }
 
+        // Checks GitHub for a newer release and prompts the user to open the download page if one is found
+        private async Task PerformUpdateCheckAsync()
+        {
+            try
+            {
+                LogManager.Instance.LogMessage("Checking for application updates", LogLevel.Info);
+                var update = await UpdateChecker.GetAvailableUpdateAsync();
+                if (update.HasValue)
+                {
+                    if (update.Value.Version == _lastNotifiedVersion)
+                    {
+                        LogManager.Instance.LogMessage($"New version {update.Value.Version} available (already notified)", LogLevel.Info);
+                        return;
+                    }
+
+                    _lastNotifiedVersion = update.Value.Version;
+                    LogManager.Instance.LogMessage($"New application version available: {update.Value.Version}", LogLevel.Info);
+                    var result = MessageBox.Show(
+                        $"A new version of {AppConstants.AppName} is available: {update.Value.Version}\n\nWould you like to open the download page?",
+                        $"{AppConstants.AppName} - Update Available",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information);
+
+                    if (result == DialogResult.Yes)
+                        AppConstants.OpenUrl(update.Value.Url);
+                }
+                else
+                {
+                    LogManager.Instance.LogMessage("Application is up to date", LogLevel.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogManager.Instance.LogDebug($"MainForm.PerformUpdateCheckAsync: {ex.Message}");
+            }
+        }
+
         // Swaps the tray icon to reflect the current sync state
         private void UpdateTrayIcon(SyncState state)
         {
             _trayIcon.Icon = state switch
             {
-                SyncState.OK              => _iconOK      ?? _iconBase!,
+                SyncState.OK              => _iconOk      ?? _iconBase!,
                 SyncState.VpnDisconnected => _iconWarning ?? _iconBase!,
                 SyncState.Error           => _iconError   ?? _iconBase!,
                 _                         =>                 _iconBase!
@@ -386,29 +403,21 @@ namespace qbPortWeaver
                 action();
         }
 
-        // Opens a file in Notepad; logs a warning if the file does not exist or the process fails to start
-        private static void OpenFileInNotepad(string filePath)
+        // Opens the log viewer window; restores and activates it if already open
+        private void ShowLogViewer()
         {
-            try
+            if (_logViewerForm is { IsDisposed: false })
             {
-                if (File.Exists(filePath))
-                {
-                    string notepadExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe");
-                    var startInfo = new ProcessStartInfo(notepadExe, $"\"{filePath}\"")
-                    {
-                        UseShellExecute = true
-                    };
-                    Process.Start(startInfo)?.Dispose();
-                }
-                else
-                {
-                    LogManager.Instance.LogMessage($"Failed to open file in Notepad: file not found ({filePath})", LogLevel.Warn);
-                }
+                if (_logViewerForm.WindowState == FormWindowState.Minimized)
+                    _logViewerForm.WindowState = FormWindowState.Normal;
+                _logViewerForm.BringToFront();
+                _logViewerForm.Activate();
+                return;
             }
-            catch (Exception ex)
-            {
-                LogManager.Instance.LogMessage($"Failed to open file in Notepad: {ex.Message}", LogLevel.Warn);
-            }
+
+            _logViewerForm = new LogViewerForm(LogManager.Instance.LogFilePath);
+            _logViewerForm.FormClosed += (_, _) => _logViewerForm = null;
+            _logViewerForm.Show();
         }
 
         // P/Invoke declarations
